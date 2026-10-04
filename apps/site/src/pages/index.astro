@@ -1,0 +1,285 @@
+---
+import Layout from "../layouts/Layout.astro";
+import {
+  FORK_REPOSITORY_URL,
+  LATEST_RELEASE_URL,
+  RELEASES_URL,
+  UPSTREAM_REPOSITORY_URL,
+} from "../lib/site";
+
+const feed = [
+  { time: "09:41", who: "mara", verb: "online", kind: "", detail: "feature/billing-ui" },
+  {
+    time: "09:42",
+    who: "devon",
+    verb: "claimed",
+    kind: "claim",
+    detail: "apps/web/src/invoices/**",
+  },
+  {
+    time: "09:44",
+    who: "mara",
+    verb: "changed",
+    kind: "contract",
+    detail: "POST /api/invoices response gains dueAt",
+    note: "contract change, 3 files, 1 schema",
+  },
+  {
+    time: "09:44",
+    who: "hub",
+    verb: "suggested",
+    kind: "",
+    detail: "to devon: read dueAt in the invoice list",
+    note: "waiting for devon to accept",
+  },
+  { time: "09:47", who: "devon", verb: "accepted", kind: "", detail: "task from mara's agent" },
+];
+---
+
+<Layout
+  title="T3 Code for teams"
+  description="A fork of T3 Code where each teammate runs their own agents and a small hub shares who is working on what, file claims and contract changes."
+>
+  <div class="wrap">
+    <header class="site-header">
+      <a class="wordmark" href="/" aria-label="T3 Code for teams, home">
+        <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="7" fill="oklch(0.55 0.18 20)"></rect>
+          <circle cx="9" cy="16" r="3" fill="#fff"></circle>
+          <circle cx="23" cy="9" r="3" fill="#fff"></circle>
+          <circle cx="23" cy="23" r="3" fill="#fff"></circle>
+          <path d="M9 16 23 9M9 16l14 7" stroke="#fff" stroke-width="1.8" fill="none"></path>
+        </svg>
+        T3 Code for teams
+      </a>
+      <nav class="header-nav" aria-label="Primary">
+        <a href={FORK_REPOSITORY_URL}>GitHub</a>
+        <a href={LATEST_RELEASE_URL} data-download>Download</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div>
+          <h1 id="hero-title">Each teammate runs their own agents. One hub keeps them in step.</h1>
+          <p class="lead">
+            T3 Code for teams is a fork of T3 Code. Every member's local server connects out to a small hub
+            that shares who is working on what, which files are claimed, and when an API contract changes.
+            Code, agents and provider logins stay on each machine.
+          </p>
+          <div class="button-row">
+            <a class="button button--primary" href={LATEST_RELEASE_URL} data-download>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"></path></svg>
+              <span data-download-label>Download</span>
+            </a>
+            <a class="button button--secondary" href={FORK_REPOSITORY_URL}>View the fork on GitHub</a>
+          </div>
+          <p class="fine">
+            Free and open source under the MIT license. Builds for macOS, Windows and Linux are on{" "}
+            <a href={RELEASES_URL}>GitHub Releases</a>.
+          </p>
+        </div>
+
+        <figure>
+          <div class="feed" role="group" aria-label="Example team feed from the hub">
+            <div class="feed-head">
+              <strong>hub / acme-web</strong>
+              <ul class="presence" aria-label="Members">
+                <li><span class="dot"></span>mara</li>
+                <li><span class="dot"></span>devon</li>
+                <li><span class="dot dot--idle"></span>priya</li>
+              </ul>
+            </div>
+            <ol class="feed-log">
+              {
+                feed.map((row, i) => (
+                  <li class="feed-row" style={`--i:${i}`}>
+                    <span class="feed-time">{row.time}</span>
+                    <span class="feed-who">{row.who}</span>
+                    <span class={`feed-verb${row.kind ? ` feed-verb--${row.kind}` : ""}`}>{row.verb}</span>
+                    <span class="feed-detail">
+                      {row.detail}
+                      {row.note && <em>{row.note}</em>}
+                    </span>
+                  </li>
+                ))
+              }
+            </ol>
+          </div>
+          <figcaption class="feed-caption">
+            A design preview of the team feed. The hub is still being built.
+          </figcaption>
+        </figure>
+      </section>
+    </main>
+  </div>
+
+  <section class="section" aria-labelledby="boundary-title">
+    <div class="wrap">
+      <h2 id="boundary-title">Only coordination crosses the wire</h2>
+      <p class="section-intro">
+        Each local server opens an outbound connection to the hub, so nobody opens a port. The hub holds
+        short summaries, never transcripts.
+      </p>
+      <div class="split">
+        <div>
+          <h3>Stays on your machine</h3>
+          <ul>
+            <li><strong>Agent processes</strong><span>Codex, Claude Code, Cursor, Grok, OpenCode and Antigravity run locally.</span></li>
+            <li><strong>Source code and worktrees</strong><span>The hub never receives file contents.</span></li>
+            <li><strong>Provider logins and subscriptions</strong><span>Your credentials are never shared with teammates.</span></li>
+            <li><strong>Full transcripts</strong><span>Conversations stay in your own T3 Code database.</span></li>
+          </ul>
+        </div>
+        <div class="split--hub">
+          <h3>Goes through the hub</h3>
+          <ul>
+            <li><strong>Presence</strong><span>Who is online, and on which branch.</span></li>
+            <li><strong>Turn summaries</strong><span>Files touched at the end of each turn.</span></li>
+            <li><strong>File claims</strong><span>A way to say "I am editing this path" before a teammate's agent does.</span></li>
+            <li><strong>Contract changes</strong><span>Changed routes, schemas and types, flagged for the people who depend on them.</span></li>
+            <li><strong>Tasks and notes</strong><span>Messages between teammates and their agents.</span></li>
+          </ul>
+        </div>
+      </div>
+      <p class="trust">
+        <strong>You stay in the loop.</strong> A message from a teammate's agent arrives as a suggested task.
+        It becomes a turn in your thread only after you accept it.
+      </p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="status-title">
+    <div class="wrap">
+      <h2 id="status-title">What works today and what comes next</h2>
+      <p class="section-intro">
+        The fork starts from T3 Code and adds the hub in four steps. Each step ships on its own.
+      </p>
+      <ol class="steps">
+        <li class="step">
+          <span class="step-n">now</span>
+          <div>
+            <h3>All of T3 Code</h3>
+            <p>
+              One app for Codex, Claude Code, Cursor, Grok Build, OpenCode and Antigravity, on desktop, web and
+              mobile, with a checkpoint at the end of every turn.
+            </p>
+          </div>
+          <span class="status status--live">Available</span>
+        </li>
+        <li class="step">
+          <span class="step-n">1</span>
+          <div>
+            <h3>Hub with teams, invites and presence</h3>
+            <p>
+              A self-hostable Docker image. Join with an invite link and see teammates online in the same
+              repository.
+            </p>
+          </div>
+          <span class="status status--next">Next</span>
+        </li>
+        <li class="step">
+          <span class="step-n">2</span>
+          <div>
+            <h3>Turn summaries in a team panel</h3>
+            <p>Branch and files touched are published when a turn finishes and show up beside your threads.</p>
+          </div>
+          <span class="status">Planned</span>
+        </li>
+        <li class="step">
+          <span class="step-n">3</span>
+          <div>
+            <h3>Agent tools over MCP</h3>
+            <p>
+              <code>team_inbox</code>, <code>team_post</code>, <code>claim_files</code> and
+              <code>list_contract_changes</code>, available to any provider.
+            </p>
+          </div>
+          <span class="status">Planned</span>
+        </li>
+        <li class="step">
+          <span class="step-n">4</span>
+          <div>
+            <h3>Contract-change detection and task routing</h3>
+            <p>When one person's agent changes an interface, the people who depend on it hear about it first.</p>
+          </div>
+          <span class="status">Planned</span>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="closer" aria-labelledby="closer-title">
+    <div class="wrap">
+      <h2 id="closer-title">Try it on your own machine</h2>
+      <p>Install the app, sign in to the agents you already use, and follow along as the hub lands.</p>
+      <div class="button-row">
+        <a class="button button--on-brand" href={LATEST_RELEASE_URL} data-download>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14"></path></svg>
+          <span data-download-label>Download</span>
+        </a>
+        <a class="button button--outline-on-brand" href={FORK_REPOSITORY_URL}>View the fork on GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <footer class="wrap site-footer">
+    <p>
+      A fork of <a href={UPSTREAM_REPOSITORY_URL}>T3 Code</a> by T3 Tools Inc., used under the MIT license. This
+      project is independent and is not affiliated with or endorsed by T3 Tools.
+    </p>
+    <ul>
+      <li><a href={FORK_REPOSITORY_URL}>This fork</a></li>
+      <li><a href={UPSTREAM_REPOSITORY_URL}>Upstream</a></li>
+      <li><a href={RELEASES_URL}>Releases</a></li>
+    </ul>
+  </footer>
+</Layout>
+
+<script>
+  import { LATEST_RELEASE_API_URL } from "../lib/site";
+
+  type Target = { label: string; assetSuffix: string };
+
+  async function detectTarget(): Promise<Target | null> {
+    const uaData = (navigator as Navigator & {
+      userAgentData?: {
+        platform?: string;
+        getHighEntropyValues?: (hints: string[]) => Promise<{ architecture?: string }>;
+      };
+    }).userAgentData;
+    const platform = (uaData?.platform ?? navigator.platform ?? "").toLowerCase();
+    const ua = navigator.userAgent.toLowerCase();
+    if (/android|iphone|ipad|ipod/.test(ua)) return null;
+    if (platform.includes("win")) return { label: "Windows", assetSuffix: "-x64.exe" };
+    if (platform.includes("mac")) {
+      const arch = await uaData?.getHighEntropyValues?.(["architecture"]).then((v) => v.architecture, () => undefined);
+      return { label: "macOS", assetSuffix: arch === "x86" ? "-x64.dmg" : "-arm64.dmg" };
+    }
+    if (platform.includes("linux")) return { label: "Linux", assetSuffix: "-x86_64.AppImage" };
+    return null;
+  }
+
+  async function enhanceDownloads() {
+    const target = await detectTarget();
+    if (!target) return;
+
+    const links = document.querySelectorAll<HTMLAnchorElement>("a[data-download]");
+    for (const label of document.querySelectorAll("[data-download-label]")) {
+      label.textContent = `Download for ${target.label}`;
+    }
+
+    try {
+      const response = await fetch(LATEST_RELEASE_API_URL, { headers: { Accept: "application/vnd.github+json" } });
+      if (!response.ok) return;
+      const release: { assets?: { name: string; browser_download_url: string }[] } = await response.json();
+      const asset = release.assets?.find((a) => a.name.endsWith(target.assetSuffix));
+      if (!asset) return;
+      for (const link of links) link.href = asset.browser_download_url;
+    } catch {
+      // Keep the releases page link when the API is unreachable or rate limited.
+    }
+  }
+
+  void enhanceDownloads();
+</script>
