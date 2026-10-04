@@ -1,0 +1,21 @@
+{
+  "name": "@t3tools/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "typecheck": "astro check"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist-mono": "^5.2.6",
+    "@fontsource-variable/schibsted-grotesk": "^5.2.8",
+    "astro": "^7.2.8"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "typescript": "~6.0.3"
+  }
+}
