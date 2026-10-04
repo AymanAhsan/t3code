@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./state/team-hub": {
+      "types": "./src/state/teamHub.ts",
+      "default": "./src/state/teamHub.ts"
+    },
     "./composerThreadItems": {
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"

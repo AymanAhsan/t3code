@@ -398,6 +398,18 @@ export function summarizeT3ToolCalls(
     case "capabilities":
       label = phrase("Checked", "check", `orchestration capabilities ${times}`);
       break;
+    case "team-inbox":
+      label = phrase("Read", "read", `team inbox ${times}`);
+      break;
+    case "team-post":
+      label = phrase("Posted", "post", `to team ${times}`);
+      break;
+    case "team-claim":
+      label = phrase("Updated", "update", `team file claims ${times}`);
+      break;
+    case "team-contracts":
+      label = phrase("Listed", "list", `contract changes ${times}`);
+      break;
   }
   return { label, failedCount };
 }

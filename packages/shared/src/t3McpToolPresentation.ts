@@ -58,7 +58,11 @@ export type T3McpToolSummaryAction =
   | "watch-pr"
   | "unwatch-pr"
   | "browser"
-  | "device";
+  | "device"
+  | "team-inbox"
+  | "team-post"
+  | "team-claim"
+  | "team-contracts";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -80,6 +84,10 @@ const T3_MCP_SERVER_ALIASES = new Set(["t3-code", "t3_code", "t3code"]);
 
 // Cards, activity rows, summaries, and provider identity recovery share this inventory.
 const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
+  team_inbox: tool(["Read", "Reading", "Read", "team inbox"], "team-inbox"),
+  team_post: tool(["Post", "Posting", "Posted", "to team"], "team-post"),
+  claim_files: tool(["Claim", "Claiming", "Claimed", "team files"], "team-claim"),
+  list_contract_changes: tool(["List", "Listing", "Listed", "contract changes"], "team-contracts"),
   link_pull_request: tool(
     ["Link", "Linking", "Linked", "a pull request"],
     "link-pr",
