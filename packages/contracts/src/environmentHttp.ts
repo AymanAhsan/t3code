@@ -57,6 +57,17 @@ import {
   RelayEnvironmentMintResponse,
   RelayLinkProofRequest,
 } from "./relay.ts";
+import {
+  TeamHubClientMessage,
+  TeamHubInvite,
+  TeamHubInviteRecord,
+  TeamHubJoinInput,
+  TeamHubBootstrapInput,
+  TeamHubRemoveMemberInput,
+  TeamHubRevokeInviteInput,
+  TeamHubState,
+  TeamHubTaskDecisionInput,
+} from "./teamHub.ts";
 
 const OptionalBearerHeaders = Schema.Struct({
   authorization: Schema.optionalKey(Schema.String),
@@ -590,6 +601,90 @@ class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullRequests").a
   }).middleware(EnvironmentAuthenticatedAuth),
 ) {}
 
+const EnvironmentTeamHubErrors = [
+  EnvironmentRequestInvalidError,
+  EnvironmentScopeRequiredError,
+  EnvironmentInternalError,
+] as const;
+
+class EnvironmentTeamHubHttpApi extends HttpApiGroup.make("teamHub")
+  .add(
+    HttpApiEndpoint.get("state", "/api/team-hub", {
+      headers: OptionalBearerHeaders,
+      success: TeamHubState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("bootstrap", "/api/team-hub/bootstrap", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubBootstrapInput,
+      success: TeamHubState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("join", "/api/team-hub/join", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubJoinInput,
+      success: TeamHubState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("leave", "/api/team-hub/leave", {
+      headers: OptionalBearerHeaders,
+      success: TeamHubState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("publish", "/api/team-hub/publish", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubClientMessage,
+      success: TeamHubState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("invite", "/api/team-hub/invite", {
+      headers: OptionalBearerHeaders,
+      success: TeamHubInvite,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("invites", "/api/team-hub/invites", {
+      headers: OptionalBearerHeaders,
+      success: Schema.Array(TeamHubInviteRecord),
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("revokeInvite", "/api/team-hub/revoke-invite", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubRevokeInviteInput,
+      success: TeamHubState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("removeMember", "/api/team-hub/remove-member", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubRemoveMemberInput,
+      success: TeamHubState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("decideTask", "/api/team-hub/decide-task", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubTaskDecisionInput,
+      success: TeamHubState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
@@ -657,4 +752,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
+  .add(EnvironmentTeamHubHttpApi)
   .add(EnvironmentConnectHttpApi) {}

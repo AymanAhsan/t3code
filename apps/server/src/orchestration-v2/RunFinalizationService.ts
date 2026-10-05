@@ -6,6 +6,9 @@ import * as Schema from "effect/Schema";
 
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as TeamHubService from "../teamHub/TeamHubService.ts";
+import * as Option from "effect/Option";
 import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -94,6 +97,10 @@ export const observerLive = Layer.effect(
     const vcsStatus = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const hub = yield* Effect.serviceOption(TeamHubService.TeamHubService);
+    const repositoryIdentity = yield* Effect.serviceOption(
+      RepositoryIdentityResolver.RepositoryIdentityResolver,
+    );
     return {
       refreshAfterTurn: pullRequests.refreshAfterTurn,
       refresh: ({ cwd, threadId, runId }) =>
@@ -102,6 +109,28 @@ export const observerLive = Layer.effect(
             [workspaceEntries.refresh(cwd), vcsStatus.refreshLocalStatus(cwd)],
             { concurrency: "unbounded" },
           );
+          if (Option.isSome(hub) && Option.isSome(repositoryIdentity) && local.refName) {
+            yield* Effect.gen(function* () {
+              const repository = yield* repositoryIdentity.value.resolve(cwd);
+              if (!repository) return;
+              const records = yield* projections.getThreadRecords(threadId, ["checkpoints"]);
+              const latest = records.checkpoints
+                .filter((checkpoint) => checkpoint.runId === runId && checkpoint.status === "ready")
+                .toSorted((a, b) => b.ordinalWithinScope - a.ordinalWithinScope)[0];
+              if (!latest) return;
+              const completedThread = yield* projections.getThreadShell(threadId);
+              yield* hub.value.publishCheckpoint({
+                repository: repository.canonicalKey,
+                branch: local.refName!,
+                files: latest.files.map((file) => file.path),
+                description: completedThread?.title || "Checkpoint captured",
+              });
+            }).pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("Could not publish team checkpoint summary", { cause }),
+              ),
+            );
+          }
           if (local.refName === null || local.isDefaultRef) return;
           const thread = yield* projections.getThreadShell(threadId);
           if (!thread || thread.branch !== local.refName) return;

@@ -19,6 +19,7 @@ export type SettingsSheetTarget =
   | "SettingsClientStorage"
   | "SettingsDiagnostics"
   | "SettingsOpenSourceLicenses"
-  | "SettingsUsage";
+  | "SettingsUsage"
+  | "SettingsTeamHub";
 
 export type SettingsLegalDocumentTarget = "SettingsLegal";

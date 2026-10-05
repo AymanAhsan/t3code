@@ -1194,6 +1194,7 @@ export const StorageCleanupSettings = Schema.Struct({
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
 export const ServerSettings = Schema.Struct({
+  teamHubUrl: Schema.NullOr(TrimmedString).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
@@ -1574,6 +1575,7 @@ const OpenCodeSettingsPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  teamHubUrl: Schema.optionalKey(Schema.NullOr(TrimmedString)),
   worktreeCleanup: Schema.optionalKey(
     Schema.NullOr(
       Schema.Union([
