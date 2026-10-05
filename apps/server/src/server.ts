@@ -79,6 +79,7 @@ import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as TeamHubNetwork from "./teamHub/TeamHubNetwork.ts";
 import * as TeamHubService from "./teamHub/TeamHubService.ts";
 import { teamHubHttpApiLayer } from "./teamHub/http.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
@@ -450,6 +451,8 @@ const TeamHubServiceLayerLive = TeamHubService.layer.pipe(
   Layer.provide(ServerSecretStore.layer),
 );
 
+const TeamHubNetworkLayerLive = TeamHubNetwork.layer.pipe(Layer.provide(FetchHttpClient.layer));
+
 const OrchestrationV2RuntimeLayerLive = OrchestrationV2ProductionLayerLive.pipe(
   Layer.provide(ProviderEventIngestor.analyticsLive),
   Layer.provide(CheckpointStoreLayerLive),
@@ -624,6 +627,7 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(TeamHubServiceLayerLive),
+  Layer.provideMerge(TeamHubNetworkLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),
   Layer.provideMerge(UsageLayerLive),
   Layer.provideMerge(TraceDiagnostics.layer),

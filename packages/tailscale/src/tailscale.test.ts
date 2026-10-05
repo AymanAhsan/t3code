@@ -8,8 +8,8 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
+import { mockSpawnerLayer, spawnerLayer } from "./mockSpawner.ts";
 import {
   buildTailscaleHttpsBaseUrl,
   disableTailscaleServe,
@@ -24,8 +24,6 @@ import {
   TailscaleCommandTimeoutError,
   TailscaleStatusParseError,
 } from "./tailscale.ts";
-
-const encoder = new TextEncoder();
 
 /**
  * Asserts nothing reachable from `error` contains `secret`. Recurses through
@@ -67,22 +65,6 @@ function assertCarriesNoSecret(error: object, secret: string): void {
 const tailscaleStatusJson = `{"Self":{"DNSName":"desktop.tail.ts.net.","TailscaleIPs":["100.100.100.100","fd7a:115c:a1e0::1","192.168.1.20"]}}`;
 const tailscaleStatusWithSingleIpJson = `{"Self":{"DNSName":"desktop.tail.ts.net.","TailscaleIPs":["100.90.1.2"]}}`;
 
-function mockHandle(result: { stdout?: string; stderr?: string; code?: number }) {
-  return ChildProcessSpawner.makeHandle({
-    pid: ChildProcessSpawner.ProcessId(1),
-    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(result.code ?? 0)),
-    isRunning: Effect.succeed(false),
-    kill: () => Effect.void,
-    unref: Effect.succeed(Effect.void),
-    stdin: Sink.drain,
-    stdout: Stream.make(encoder.encode(result.stdout ?? "")),
-    stderr: Stream.make(encoder.encode(result.stderr ?? "")),
-    all: Stream.empty,
-    getInputFd: () => Sink.drain,
-    getOutputFd: () => Stream.empty,
-  });
-}
-
 function neverFinishingMockHandle() {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(1),
@@ -97,32 +79,6 @@ function neverFinishingMockHandle() {
     getInputFd: () => Sink.drain,
     getOutputFd: () => Stream.empty,
   });
-}
-
-// The executable name depends on the host platform (`tailscale.exe` on
-// Windows), so pin it: these tests assert the posix spelling.
-function spawnerLayer(spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) {
-  return Layer.merge(
-    Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
-    Layer.succeed(HostProcessPlatform, "linux"),
-  );
-}
-
-function mockSpawnerLayer(
-  handler: (
-    command: string,
-    args: ReadonlyArray<string>,
-  ) => { stdout?: string; stderr?: string; code?: number },
-) {
-  return spawnerLayer(
-    ChildProcessSpawner.make((command) => {
-      const childProcess = command as unknown as {
-        readonly command: string;
-        readonly args: ReadonlyArray<string>;
-      };
-      return Effect.succeed(mockHandle(handler(childProcess.command, childProcess.args)));
-    }),
-  );
 }
 
 describe("tailscale", () => {
@@ -376,6 +332,50 @@ describe("tailscale", () => {
       assert.deepEqual(commands, [
         { command: "tailscale", args: ["serve", "--https=8443", "off"] },
       ]);
+    });
+  });
+
+  it.effect("publishes through funnel and switches it off with the same subcommand", () => {
+    const commands: ReadonlyArray<string>[] = [];
+    const layer = mockSpawnerLayer((_command, args) => {
+      commands.push(args);
+      return {};
+    });
+
+    return Effect.gen(function* () {
+      yield* ensureTailscaleServe({ localPort: 8080, exposure: "funnel" });
+      yield* disableTailscaleServe({ servePort: 8443, exposure: "funnel" });
+      assert.deepEqual(commands, [
+        ["funnel", "--bg", "--https=443", "http://127.0.0.1:8080"],
+        ["funnel", "--https=8443", "off"],
+      ]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("names setup failures by diagnostic without quoting stderr", () => {
+    const cases = [
+      ["failed to connect to local Tailscale service; is Tailscale running?", "daemon-unreachable"],
+      [
+        "Serve is not enabled on your tailnet. To enable, visit: https://example.test/f/serve",
+        "https-disabled",
+      ],
+      ["Funnel not available; HTTPS must be enabled.", "https-disabled"],
+      ['Funnel not available; "funnel" node attribute not set.', "funnel-not-allowed"],
+    ] as const;
+
+    return Effect.gen(function* () {
+      for (const [stderr, expected] of cases) {
+        const error = yield* ensureTailscaleServe({ localPort: 8080, exposure: "funnel" }).pipe(
+          Effect.flip,
+          Effect.provide(
+            mockSpawnerLayer(() => ({ code: 1, stderr: `${stderr} tskey-auth-secret` })),
+          ),
+        );
+        assert.instanceOf(error, TailscaleCommandExitError);
+        assert.equal(error.subcommand, "funnel");
+        assert.equal(error.stderrDiagnostic, expected);
+        assertCarriesNoSecret(error, "tskey-auth-secret");
+      }
     });
   });
 });

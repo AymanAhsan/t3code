@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema";
 
+import { PortSchema } from "./baseSchemas.ts";
+
 export const TEAM_HUB_PROTOCOL_VERSION = 1;
 
 const Text = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));
@@ -92,6 +94,73 @@ export const TeamHubBootstrapInput = Schema.Struct({
   displayName: Text,
 });
 export type TeamHubBootstrapInput = typeof TeamHubBootstrapInput.Type;
+
+/**
+ * How a hub on this machine is shared over Tailscale. `private` keeps it on the
+ * tailnet (Tailscale Serve); `public` publishes it to the internet (Funnel), so
+ * teammates need nothing installed.
+ */
+export const TeamHubExposure = Schema.Literals(["private", "public"]);
+export type TeamHubExposure = typeof TeamHubExposure.Type;
+
+/** Each reason has exactly one fix a person can do, which is what the UI offers. */
+export const TeamHubNetworkBlockedReason = Schema.Literals([
+  "not-installed",
+  "daemon-not-running",
+  "signed-out",
+  "stopped",
+  "awaiting-approval",
+  "https-disabled",
+  "funnel-not-allowed",
+]);
+export type TeamHubNetworkBlockedReason = typeof TeamHubNetworkBlockedReason.Type;
+
+export const TeamHubNetworkFailureReason = Schema.Literals([
+  "permission-denied",
+  "timed-out",
+  "command-failed",
+]);
+export type TeamHubNetworkFailureReason = typeof TeamHubNetworkFailureReason.Type;
+
+/**
+ * Where a hub running on the same machine as this server stands on Tailscale.
+ * `failed` only comes back from an expose or unexpose attempt, never from a read.
+ */
+export const TeamHubNetworkState = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("blocked"), reason: TeamHubNetworkBlockedReason }),
+  Schema.Struct({ status: Schema.Literal("no-hub"), hubPort: PortSchema }),
+  Schema.Struct({ status: Schema.Literal("ready"), hubPort: PortSchema }),
+  Schema.Struct({
+    status: Schema.Literal("exposed"),
+    servePort: PortSchema,
+    exposure: TeamHubExposure,
+    url: Schema.String,
+    // False while Tailscale is still issuing the HTTPS certificate.
+    reachable: Schema.Boolean,
+  }),
+  Schema.Struct({ status: Schema.Literal("conflict"), servePort: PortSchema }),
+  Schema.Struct({ status: Schema.Literal("failed"), reason: TeamHubNetworkFailureReason }),
+]);
+export type TeamHubNetworkState = typeof TeamHubNetworkState.Type;
+
+export const TeamHubNetworkInput = Schema.Struct({
+  hubPort: PortSchema,
+  servePort: PortSchema,
+  exposure: TeamHubExposure,
+});
+export type TeamHubNetworkInput = typeof TeamHubNetworkInput.Type;
+
+export const TeamHubCheckInput = Schema.Struct({ url: Text });
+export type TeamHubCheckInput = typeof TeamHubCheckInput.Type;
+
+/** Whether this machine can reach a hub address, and why not when Tailscale is the cause. */
+export const TeamHubReachability = Schema.Struct({
+  reachable: Schema.Boolean,
+  /** The address looks like a tailnet one (`*.ts.net` or 100.64.0.0/10). */
+  tailnetHost: Schema.Boolean,
+  blocked: Schema.NullOr(TeamHubNetworkBlockedReason),
+});
+export type TeamHubReachability = typeof TeamHubReachability.Type;
 
 export const TeamHubInvite = Schema.Struct({ id: Id, token: Text, expiresAt: Schema.Number });
 export type TeamHubInvite = typeof TeamHubInvite.Type;

@@ -11,6 +11,7 @@ import {
   failEnvironmentInvalidRequest,
   requireEnvironmentScope,
 } from "../auth/http.ts";
+import * as TeamHubNetwork from "./TeamHubNetwork.ts";
 import * as TeamHubService from "./TeamHubService.ts";
 
 export const teamHubHttpApiLayer = HttpApiBuilder.group(
@@ -18,6 +19,7 @@ export const teamHubHttpApiLayer = HttpApiBuilder.group(
   "teamHub",
   Effect.fnUntraced(function* (handlers) {
     const hub = yield* TeamHubService.TeamHubService;
+    const network = yield* TeamHubNetwork.TeamHubNetwork;
     const state = hub.state;
     return handlers
       .handle(
@@ -113,6 +115,36 @@ export const teamHubHttpApiLayer = HttpApiBuilder.group(
             .decideTask(payload.taskId, payload.decision)
             .pipe(Effect.catch((cause) => failEnvironmentInternal("internal_error", cause)));
           return yield* state;
+        }),
+      )
+      .handle(
+        "networkState",
+        Effect.fn("teamHub.networkState")(function* ({ payload }) {
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          return yield* network.state(payload);
+        }),
+      )
+      .handle(
+        "exposeHub",
+        Effect.fn("teamHub.exposeHub")(function* ({ payload }) {
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          return yield* network.expose(payload);
+        }),
+      )
+      .handle(
+        "unexposeHub",
+        Effect.fn("teamHub.unexposeHub")(function* ({ payload }) {
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          return yield* network.unexpose(payload);
+        }),
+      )
+      .handle(
+        "checkHub",
+        Effect.fn("teamHub.checkHub")(function* ({ payload }) {
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          return yield* network
+            .check(payload.url)
+            .pipe(Effect.catch(() => failEnvironmentInvalidRequest("invalid_command")));
         }),
       );
   }),

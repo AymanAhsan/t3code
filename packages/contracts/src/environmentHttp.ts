@@ -58,11 +58,15 @@ import {
   RelayLinkProofRequest,
 } from "./relay.ts";
 import {
+  TeamHubCheckInput,
   TeamHubClientMessage,
   TeamHubInvite,
   TeamHubInviteRecord,
   TeamHubJoinInput,
   TeamHubBootstrapInput,
+  TeamHubNetworkInput,
+  TeamHubNetworkState,
+  TeamHubReachability,
   TeamHubRemoveMemberInput,
   TeamHubRevokeInviteInput,
   TeamHubState,
@@ -681,6 +685,40 @@ class EnvironmentTeamHubHttpApi extends HttpApiGroup.make("teamHub")
       headers: OptionalBearerHeaders,
       payload: TeamHubTaskDecisionInput,
       success: TeamHubState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  // The network endpoints are POST even when they only read: each shells out to
+  // the Tailscale CLI, so none of them is cacheable or idempotent to the network.
+  .add(
+    HttpApiEndpoint.post("networkState", "/api/team-hub/network", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubNetworkInput,
+      success: TeamHubNetworkState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("exposeHub", "/api/team-hub/network/expose", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubNetworkInput,
+      success: TeamHubNetworkState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("unexposeHub", "/api/team-hub/network/unexpose", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubNetworkInput,
+      success: TeamHubNetworkState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("checkHub", "/api/team-hub/check", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubCheckInput,
+      success: TeamHubReachability,
       error: EnvironmentTeamHubErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
