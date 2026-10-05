@@ -34,6 +34,22 @@ function inviteLink(url: string, invite: TeamHubInvite): string {
   return link.toString();
 }
 
+// Invite links reuse the address this hub was set up with, so a loopback address only works
+// on the admin's own machine.
+function isLoopbackAddress(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return (
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host === "[::1]" ||
+      host.startsWith("127.")
+    );
+  } catch {
+    return false;
+  }
+}
+
 function AdminInvites({
   prepared,
   url,
@@ -70,6 +86,13 @@ function AdminInvites({
       <Button size="sm" variant="outline" disabled={busy} onClick={onCreate}>
         Create invite
       </Button>
+      {isLoopbackAddress(url) && (
+        <p className="text-warning">
+          This hub's address is {new URL(url).host}, which only works on this computer. Teammates
+          can't use invites from it. Set the hub up again from a link with an address they can
+          reach.
+        </p>
+      )}
       {invite && (
         <>
           <p>Invite expires {new Date(invite.expiresAt).toLocaleString()}.</p>

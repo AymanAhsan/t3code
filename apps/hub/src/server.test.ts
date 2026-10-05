@@ -103,6 +103,45 @@ describe("team hub server", () => {
     }
   });
 
+  it("drops a client that stops answering pings and keeps one that does", async () => {
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-team-hub-heartbeat-"));
+    dirs.push(dir);
+    const store = new HubStore(dir);
+    const admin = store.bootstrap(
+      store.setupToken!,
+      "Engineering",
+      "github.com/example/repo",
+      "Alice",
+    );
+    const bob = store.join(
+      store.createInvite(store.authenticate(admin.credential), admin.team.id).token,
+      "Bob",
+    );
+    const server = await createHubServer(store, { host: "127.0.0.1", port: 0, heartbeatMs: 50 });
+    const url = `ws://127.0.0.1:${server.port}/ws?version=1`;
+    const responsive = new WebSocket(url);
+    const silent = new WebSocket(url, { autoPong: false });
+    try {
+      await Promise.all([
+        new Promise<void>((resolve) => responsive.once("open", resolve)),
+        new Promise<void>((resolve) => silent.once("open", resolve)),
+      ]);
+      const closed = new Promise<void>((resolve) => silent.once("close", () => resolve()));
+      let responsiveClosed = false;
+      responsive.once("close", () => (responsiveClosed = true));
+      responsive.send(JSON.stringify({ type: "hello", credential: admin.credential }));
+      silent.send(JSON.stringify({ type: "hello", credential: bob.credential }));
+      await closed;
+      expect(responsiveClosed).toBe(false);
+      expect(responsive.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      responsive.terminate();
+      silent.terminate();
+      await server.close();
+      store.close();
+    }
+  });
+
   it("rejects incompatible protocol versions before upgrading", async () => {
     const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-team-hub-version-"));
     dirs.push(dir);

@@ -75,8 +75,14 @@ function rejectUpgrade(socket: NodeStream.Duplex, status: number, message: strin
   );
 }
 
-export async function createHubServer(store: HubStore, options: { host: string; port: number }) {
+// Proxies such as Tailscale Funnel drop idle sockets, so the hub pings every client and
+// terminates the ones that miss a pong. `heartbeatMs` is overridable for tests.
+export async function createHubServer(
+  store: HubStore,
+  options: { host: string; port: number; heartbeatMs?: number },
+) {
   const connections = new Set<Connected>();
+  const alive = new WeakSet<WebSocket>();
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: 16 * 1024,
@@ -214,7 +220,20 @@ export async function createHubServer(store: HubStore, options: { host: string; 
     wss.handleUpgrade(request, socket, head, (client) => wss.emit("connection", client, request));
   });
 
+  const heartbeat = setInterval(() => {
+    for (const client of wss.clients) {
+      if (!alive.has(client)) {
+        client.terminate();
+        continue;
+      }
+      alive.delete(client);
+      client.ping();
+    }
+  }, options.heartbeatMs ?? 25_000);
+
   wss.on("connection", (socket) => {
+    alive.add(socket);
+    socket.on("pong", () => alive.add(socket));
     let connection: Connected | null = null;
     const authDeadline = setTimeout(() => socket.close(4001, "Authentication required"), 10_000);
     socket.on("message", (data) => {
@@ -274,6 +293,7 @@ export async function createHubServer(store: HubStore, options: { host: string; 
   return {
     port: address.port,
     close: async () => {
+      clearInterval(heartbeat);
       for (const connection of connections) connection.socket.terminate();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       wss.close();
