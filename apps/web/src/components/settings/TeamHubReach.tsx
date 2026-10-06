@@ -33,6 +33,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
+import { SettingsRow } from "./settingsLayout";
 import {
   DEFAULT_HUB_PORT,
   DEFAULT_SHARE_PORT,
@@ -449,34 +450,40 @@ function HubAddressStatus({ prepared, url }: { prepared: PreparedConnection; url
 
   if (shown?.status === "exposed") {
     return (
-      <div className="space-y-2">
-        <h3 className="font-medium">Hub address</h3>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate font-mono text-xs text-muted-foreground">{shown.url}</span>
-            <Badge variant={shown.exposure === "public" ? "warning" : "info"} size="sm">
-              {shown.exposure === "public" ? "Public" : "Private"}
-            </Badge>
-            {shown.reachable ? null : (
-              <Badge variant="outline" size="sm">
-                Waiting for HTTPS
-              </Badge>
-            )}
-          </div>
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={busy}
-            onClick={() => setConfirmingStop(true)}
-          >
-            Stop sharing
-          </Button>
-        </div>
-        {requestError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {requestError}
-          </p>
-        ) : null}
+      <>
+        <SettingsRow
+          title="Hub address"
+          description={<span className="font-mono break-all">{shown.url}</span>}
+          status={
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge variant={shown.exposure === "public" ? "warning" : "info"} size="sm">
+                  {shown.exposure === "public" ? "Public" : "Private"}
+                </Badge>
+                {shown.reachable ? null : (
+                  <Badge variant="outline" size="sm">
+                    Waiting for HTTPS
+                  </Badge>
+                )}
+              </div>
+              {requestError ? (
+                <p role="alert" className="text-destructive">
+                  {requestError}
+                </p>
+              ) : null}
+            </div>
+          }
+          control={
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setConfirmingStop(true)}
+            >
+              Stop sharing
+            </Button>
+          }
+        />
         <AlertDialog
           open={confirmingStop}
           onOpenChange={(open) => {
@@ -517,7 +524,7 @@ function HubAddressStatus({ prepared, url }: { prepared: PreparedConnection; url
             </AlertDialogFooter>
           </AlertDialogPopup>
         </AlertDialog>
-      </div>
+      </>
     );
   }
 
@@ -525,30 +532,36 @@ function HubAddressStatus({ prepared, url }: { prepared: PreparedConnection; url
   // offer the way back in.
   if (shown?.status === "ready") {
     return (
-      <div className="space-y-2">
-        <h3 className="font-medium">Hub address</h3>
-        <p className="text-muted-foreground">
-          <span className="font-mono text-xs">{url}</span> isn't shared right now.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button size="xs" disabled={busy} onClick={() => void run("exposeHub", "public")}>
-            Share publicly
-          </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={busy}
-            onClick={() => void run("exposeHub", "private")}
-          >
-            Share on my tailnet
-          </Button>
-        </div>
-        {requestError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {requestError}
-          </p>
-        ) : null}
-      </div>
+      <SettingsRow
+        title="Hub address"
+        description={
+          <>
+            <span className="font-mono break-all">{url}</span> isn't shared right now.
+          </>
+        }
+        status={
+          requestError ? (
+            <p role="alert" className="text-destructive">
+              {requestError}
+            </p>
+          ) : null
+        }
+        control={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button size="sm" disabled={busy} onClick={() => void run("exposeHub", "public")}>
+              Share publicly
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void run("exposeHub", "private")}
+            >
+              Share on my tailnet
+            </Button>
+          </div>
+        }
+      />
     );
   }
 
