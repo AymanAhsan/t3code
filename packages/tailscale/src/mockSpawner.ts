@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as PlatformError from "effect/PlatformError";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -32,11 +33,12 @@ export function spawnerLayer(spawner: ChildProcessSpawner.ChildProcessSpawner["S
   );
 }
 
+/** A handler returns "not-found" for a command that does not exist on this machine. */
 export function mockSpawnerLayer(
   handler: (
     command: string,
     args: ReadonlyArray<string>,
-  ) => { stdout?: string; stderr?: string; code?: number },
+  ) => { stdout?: string; stderr?: string; code?: number } | "not-found",
 ) {
   return spawnerLayer(
     ChildProcessSpawner.make((command) => {
@@ -44,7 +46,16 @@ export function mockSpawnerLayer(
         readonly command: string;
         readonly args: ReadonlyArray<string>;
       };
-      return Effect.succeed(mockHandle(handler(childProcess.command, childProcess.args)));
+      const result = handler(childProcess.command, childProcess.args);
+      return result === "not-found"
+        ? Effect.fail(
+            PlatformError.systemError({
+              _tag: "NotFound",
+              module: "ChildProcess",
+              method: "spawn",
+            }),
+          )
+        : Effect.succeed(mockHandle(result));
     }),
   );
 }

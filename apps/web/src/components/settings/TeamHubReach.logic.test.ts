@@ -5,6 +5,7 @@ import {
   hubStartCommand,
   isTailscaleShareUrl,
   nextSharePort,
+  normalizeHubAddress,
   presentNetworkState,
   presentReachability,
   servePortOfUrl,
@@ -162,6 +163,20 @@ describe("share helpers", () => {
     expect(isTailscaleShareUrl("https://Desk.Tail.ts.net/")).toBe(true);
     expect(isTailscaleShareUrl("http://192.168.1.20:8080")).toBe(false);
     expect(isTailscaleShareUrl("http://100.101.102.103:8080")).toBe(false);
+  });
+
+  it("keeps only the origin of a hub address a person typed", () => {
+    expect(normalizeHubAddress(" https://desk.tail.ts.net/setup#token=x ")).toBe(
+      "https://desk.tail.ts.net",
+    );
+    expect(normalizeHubAddress("desk.tail.ts.net:8443")).toBe("https://desk.tail.ts.net:8443");
+    expect(normalizeHubAddress("http://100.101.102.103:8080/")).toBe("http://100.101.102.103:8080");
+  });
+
+  it("rejects what cannot be a hub address", () => {
+    expect(normalizeHubAddress("")).toBeNull();
+    expect(normalizeHubAddress("ftp://desk.tail.ts.net")).toBeNull();
+    expect(normalizeHubAddress("not a url")).toBeNull();
   });
 
   it("maps the start command to the container's fixed port", () => {

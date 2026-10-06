@@ -65,6 +65,22 @@ export function servePortOfUrl(url: string): number {
   }
 }
 
+/**
+ * The address a hub is shared on, from what a person typed or pasted, or null
+ * when it is not an http(s) address. Paths and query strings are dropped: the
+ * hub lives at the origin.
+ */
+export function normalizeHubAddress(input: string): string | null {
+  const text = input.trim();
+  if (text.length === 0) return null;
+  try {
+    const parsed = new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(text) ? text : `https://${text}`);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Only these names can be a Tailscale share, so only these are worth asking Tailscale about. */
 export function isTailscaleShareUrl(url: string): boolean {
   try {

@@ -37,9 +37,11 @@ import {
   DEFAULT_HUB_PORT,
   DEFAULT_SHARE_PORT,
   isTailscaleShareUrl,
+  normalizeHubAddress,
   presentNetworkState,
   presentReachability,
   servePortOfUrl,
+  shareCommand,
   type ReachPresentation,
 } from "./TeamHubReach.logic";
 
@@ -252,6 +254,95 @@ function CheckingTailscale() {
 }
 
 /**
+ * Way out for when the app cannot see Tailscale but the person knows it is
+ * there (a launcher with an old PATH, an unusual install). They share the hub
+ * with the command themselves and give the address it prints. The address is
+ * not probed: the same blocked check is what got them here.
+ */
+function ManualHubAddress({
+  command,
+  address,
+  onAddress,
+}: {
+  command: string;
+  address: string | null;
+  onAddress: (address: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [invalid, setInvalid] = useState(false);
+
+  if (address !== null) {
+    return (
+      <p className="flex flex-wrap items-center gap-2 text-sm">
+        <span>
+          Using <span className="font-mono text-xs">{address}</span>
+        </span>
+        <Button size="xs" variant="outline" onClick={() => onAddress(null)}>
+          Change
+        </Button>
+      </p>
+    );
+  }
+  if (!open) {
+    return (
+      <Button size="xs" variant="outline" onClick={() => setOpen(true)}>
+        Tailscale is installed — enter the address myself
+      </Button>
+    );
+  }
+
+  const commit = () => {
+    const next = normalizeHubAddress(draft);
+    setInvalid(next === null);
+    if (next !== null) onAddress(next);
+  };
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-muted-foreground">
+        Run this in a terminal on this computer, then enter the address your teammates will use.
+      </p>
+      <Input
+        readOnly
+        size="sm"
+        font="mono"
+        aria-label="Command"
+        value={command}
+        onFocus={(event) => event.target.select()}
+      />
+      <div className="flex gap-2">
+        <Input
+          size="sm"
+          font="mono"
+          aria-label="Hub address"
+          placeholder="https://my-computer.tailnet-name.ts.net"
+          value={draft}
+          aria-invalid={invalid}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setInvalid(false);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit();
+            }
+          }}
+        />
+        <Button size="xs" onClick={commit}>
+          Use this address
+        </Button>
+      </div>
+      {invalid ? (
+        <p role="alert" className="text-sm text-destructive">
+          Enter a web address, like https://my-computer.tailnet-name.ts.net.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Setup step: share a hub running on this computer over Tailscale. Reports the
  * address once it answers, or null while there is none to use.
  * `onAddress` must be a stable callback.
@@ -271,7 +362,11 @@ export function HubSharing({
   const input = useMemo(() => ({ hubPort, servePort, exposure }), [hubPort, servePort, exposure]);
   const { shown, busy, requestError, recheck, run } = useHubNetwork(prepared, input);
 
-  const address = shown?.status === "exposed" && shown.reachable ? shown.url : null;
+  const [manualAddress, setManualAddress] = useState<string | null>(null);
+
+  // A share Tailscale confirms outranks one the person typed in.
+  const detectedAddress = shown?.status === "exposed" && shown.reachable ? shown.url : null;
+  const address = detectedAddress ?? manualAddress;
   useEffect(() => {
     onAddress(address);
   }, [address, onAddress]);
@@ -329,6 +424,13 @@ export function HubSharing({
         <p role="alert" className="text-sm text-destructive">
           {requestError}
         </p>
+      ) : null}
+      {shown.status === "blocked" ? (
+        <ManualHubAddress
+          command={shareCommand({ exposure, hubPort, servePort })}
+          address={manualAddress}
+          onAddress={setManualAddress}
+        />
       ) : null}
     </div>
   );

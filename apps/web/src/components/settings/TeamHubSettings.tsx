@@ -271,7 +271,12 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
                 ))}
               </RadioGroup>
               {reach !== "other" && (
-                <HubSharing prepared={prepared} exposure={reach} onAddress={setShareAddress} />
+                <HubSharing
+                  key={reach}
+                  prepared={prepared}
+                  exposure={reach}
+                  onAddress={setShareAddress}
+                />
               )}
             </div>
           )}

@@ -19,6 +19,7 @@ import {
   parseTailscaleStatus,
   readTailscaleStatus,
   TAILSCALE_STATUS_TIMEOUT,
+  tailscaleFallbackExecutables,
   TailscaleCommandExitError,
   TailscaleCommandSpawnError,
   TailscaleCommandTimeoutError,
@@ -172,6 +173,68 @@ describe("tailscale", () => {
       assert.equal(error.message, "Failed to spawn tailscale status.");
       assert.notInclude(error.message, systemCause.message);
     });
+  });
+
+  it.effect("finds tailscale at its install location when the name is not on PATH", () => {
+    const tried: Array<string> = [];
+    const layer = mockSpawnerLayer((command) => {
+      tried.push(command);
+      return command === "/usr/bin/tailscale"
+        ? { stdout: tailscaleStatusWithSingleIpJson }
+        : "not-found";
+    });
+
+    return Effect.gen(function* () {
+      const status = yield* readTailscaleStatus.pipe(Effect.provide(layer));
+      assert.equal(status.magicDnsName, "desktop.tail.ts.net");
+      assert.deepEqual(tried, ["tailscale", "/usr/bin/tailscale"]);
+    });
+  });
+
+  it.effect("does not retry from install locations once the CLI has started", () => {
+    const tried: Array<string> = [];
+    const layer = mockSpawnerLayer((command) => {
+      tried.push(command);
+      return { code: 1, stderr: "Logged out." };
+    });
+
+    return Effect.gen(function* () {
+      const error = yield* readTailscaleStatus.pipe(Effect.flip, Effect.provide(layer));
+      assert.instanceOf(error, TailscaleCommandExitError);
+      assert.deepEqual(tried, ["tailscale"]);
+    });
+  });
+
+  it.effect("reports the plain-name failure when no install location has tailscale", () => {
+    const layer = mockSpawnerLayer(() => "not-found");
+
+    return Effect.gen(function* () {
+      const error = yield* readTailscaleStatus.pipe(Effect.flip, Effect.provide(layer));
+      assert.instanceOf(error, TailscaleCommandSpawnError);
+      assert.equal(error.executable, "tailscale");
+    });
+  });
+
+  it("lists Windows install locations from the environment without duplicates", () => {
+    assert.deepEqual(
+      tailscaleFallbackExecutables("win32", {
+        ProgramFiles: "D:\\Apps",
+        ProgramW6432: "D:\\Apps",
+        "ProgramFiles(x86)": "C:\\Program Files (x86)",
+      }),
+      [
+        "D:\\Apps\\Tailscale\\tailscale.exe",
+        "C:\\Program Files (x86)\\Tailscale\\tailscale.exe",
+        "C:\\Program Files\\Tailscale\\tailscale.exe",
+      ],
+    );
+  });
+
+  it("includes the macOS app bundle, where the CLI is not on PATH", () => {
+    assert.include(
+      tailscaleFallbackExecutables("darwin", {}),
+      "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    );
   });
 
   it.effect("turns spawn defects into typed spawn failures", () => {
