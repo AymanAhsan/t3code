@@ -11,6 +11,7 @@ import {
   WS_METHODS,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import type { TeamHubState } from "@t3tools/contracts/teamHub";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -92,6 +93,48 @@ const makeHarness = Effect.fn("TestEnvironmentRpc.makeHarness")(function* () {
 });
 
 describe("environment RPC", () => {
+  it.effect(
+    "receives team hub updates and current state after the WebSocket session reconnects",
+    () =>
+      Effect.gen(function* () {
+        const initial: TeamHubState = {
+          url: "https://hub.example.test",
+          status: "connecting",
+          snapshot: null,
+          error: null,
+        };
+        const latest: TeamHubState = {
+          ...initial,
+          status: "disconnected",
+          error: "Hub disconnected",
+        };
+        const firstEvents = yield* Queue.unbounded<TeamHubState>();
+        const received = yield* Queue.unbounded<TeamHubState>();
+        const firstClient = {
+          [WS_METHODS.subscribeTeamHubState]: () =>
+            Stream.concat(Stream.make(initial), Stream.fromQueue(firstEvents)),
+        } as unknown as WsRpcProtocolClient;
+        const secondClient = {
+          [WS_METHODS.subscribeTeamHubState]: () =>
+            Stream.concat(Stream.make(latest), Stream.never),
+        } as unknown as WsRpcProtocolClient;
+        const { activeSession, supervisor } = yield* makeHarness();
+        yield* SubscriptionRef.set(activeSession, Option.some(session(firstClient)));
+        const fiber = yield* subscribe(WS_METHODS.subscribeTeamHubState, {}).pipe(
+          Stream.runForEach((state) => Queue.offer(received, state)),
+          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+          Effect.forkChild,
+        );
+        expect(yield* Queue.take(received)).toEqual(initial);
+        const update: TeamHubState = { ...initial, status: "connected" };
+        yield* Queue.offer(firstEvents, update);
+        expect(yield* Queue.take(received)).toEqual(update);
+        yield* SubscriptionRef.set(activeSession, Option.some(session(secondClient)));
+        expect(yield* Queue.take(received)).toEqual(latest);
+        yield* Fiber.interrupt(fiber);
+      }),
+  );
+
   it.effect("registers a fresh preview host after completion without replaying requests", () =>
     Effect.gen(function* () {
       const firstCompleted = yield* Deferred.make<void>();

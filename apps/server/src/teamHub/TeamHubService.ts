@@ -15,6 +15,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -37,6 +39,7 @@ export class TeamHubService extends Context.Service<
   TeamHubService,
   {
     readonly state: Effect.Effect<TeamHubState>;
+    readonly stream: Stream.Stream<TeamHubState>;
     readonly start: Effect.Effect<void, TeamHubError>;
     readonly stop: Effect.Effect<void>;
     readonly join: (input: {
@@ -71,6 +74,29 @@ const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   let state: TeamHubState = { url: null, status: "disconnected", snapshot: null, error: null };
+  const listeners = new Set<(state: TeamHubState) => void>();
+  const setState = (next: TeamHubState) => {
+    state = next;
+    for (const listener of listeners) listener(next);
+  };
+  // Send current state on every subscription, then only changes. A slow client
+  // retains at most one full snapshot, since intermediate states can be skipped.
+  const stream = Stream.callback<TeamHubState>(
+    (mailbox) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const listener = (next: TeamHubState) => Queue.offerUnsafe(mailbox, next);
+          listeners.add(listener);
+          listener(state);
+          return listener;
+        }),
+        (listener) =>
+          Effect.sync(() => {
+            listeners.delete(listener);
+          }),
+      ),
+    { bufferSize: 1, strategy: "sliding" },
+  );
   let credential: string | null = null;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -81,7 +107,7 @@ const make = Effect.gen(function* () {
     reconnectTimer = null;
     socket?.close();
     socket = null;
-    state = { ...state, status: "disconnected", snapshot: null };
+    setState({ ...state, status: "disconnected", snapshot: null });
   };
 
   const connect = () => {
@@ -93,14 +119,14 @@ const make = Effect.gen(function* () {
       if (url.protocol !== "http:" && url.protocol !== "https:")
         throw new Error("Invalid hub protocol");
     } catch {
-      state = { ...state, error: "Invalid team hub address" };
+      setState({ ...state, error: "Invalid team hub address" });
       return;
     }
     url.searchParams.set("version", String(TEAM_HUB_PROTOCOL_VERSION));
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     const current = new WebSocket(url);
     socket = current;
-    state = { ...state, status: "connecting", error: null };
+    setState({ ...state, status: "connecting", error: null });
     current.addEventListener("open", () => {
       if (socket !== current) return;
       current.send(JSON.stringify({ type: "hello", credential }));
@@ -116,12 +142,12 @@ const make = Effect.gen(function* () {
           message.type === "snapshot" &&
           "snapshot" in message
         ) {
-          state = {
+          setState({
             ...state,
             status: "connected",
             snapshot: decodeSnapshot(message.snapshot),
             error: null,
-          };
+          });
         } else if (
           message &&
           typeof message === "object" &&
@@ -130,25 +156,25 @@ const make = Effect.gen(function* () {
           "message" in message &&
           typeof message.message === "string"
         ) {
-          state = { ...state, error: message.message };
+          setState({ ...state, error: message.message });
         }
       } catch {
-        state = { ...state, error: "Hub sent an invalid response" };
+        setState({ ...state, error: "Hub sent an invalid response" });
       }
     });
     current.addEventListener("close", (event) => {
       if (socket !== current) return;
       socket = null;
-      state = {
+      setState({
         ...state,
         status: "disconnected",
         snapshot: null,
         error: event.code === 4003 ? "Membership revoked" : "Hub disconnected",
-      };
+      });
       if (!stopped && event.code !== 4003) reconnectTimer = setTimeout(connect, 3000);
     });
     current.addEventListener("error", () => {
-      if (socket === current) state = { ...state, error: "Cannot reach team hub" };
+      if (socket === current) setState({ ...state, error: "Cannot reach team hub" });
     });
   };
 
@@ -197,7 +223,7 @@ const make = Effect.gen(function* () {
           (cause) => new TeamHubError({ reason: "Cannot load team membership", cause }),
         ),
       );
-    state = { ...state, url: currentSettings.teamHubUrl };
+    setState({ ...state, url: currentSettings.teamHubUrl });
     credential = Option.isSome(saved) ? decoder.decode(saved.value) : null;
     connect();
   });
@@ -254,7 +280,7 @@ const make = Effect.gen(function* () {
           ),
         );
       credential = result;
-      state = { url: url.toString(), status: "disconnected", snapshot: null, error: null };
+      setState({ url: url.toString(), status: "disconnected", snapshot: null, error: null });
       connect();
     });
 
@@ -275,11 +301,12 @@ const make = Effect.gen(function* () {
           (cause) => new TeamHubError({ reason: "Cannot clear team hub address", cause }),
         ),
       );
-    state = { url: null, status: "disconnected", snapshot: null, error: null };
+    setState({ url: null, status: "disconnected", snapshot: null, error: null });
   });
 
   return TeamHubService.of({
     state: Effect.sync(() => state),
+    stream,
     start,
     stop: Effect.sync(() => {
       stopped = true;

@@ -2,8 +2,11 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset } from "./ui/sidebar";
 import { isElectron } from "../env";
 import { WorkspacePageHeader } from "./WorkspacePageHeader";
+import { IncomingTeamHubTask } from "./chat/IncomingTeamHubTask";
+import { usePrimaryEnvironmentId } from "~/state/environments";
 
 export function NoActiveThreadState() {
+  const environmentId = usePrimaryEnvironmentId();
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
@@ -18,6 +21,8 @@ export function NoActiveThreadState() {
             </div>
           )}
         </WorkspacePageHeader>
+
+        {environmentId ? <IncomingTeamHubTask environmentId={environmentId} /> : null}
 
         <Empty className="flex-1">
           <div className="w-full max-w-lg px-8 py-12">

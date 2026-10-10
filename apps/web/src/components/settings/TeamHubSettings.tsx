@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   parseTeamHubLink,
   readTeamHubInvites,
-  readTeamHubState,
+  incomingTeamHubTasks,
   teamHubActionErrorMessage,
   withTeamHubOrigin,
   type TeamHubAction,
@@ -23,7 +23,7 @@ import { cn } from "~/lib/utils";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { usePreparedConnection } from "~/state/session";
-import { teamHubActionCommand } from "~/state/teamHub";
+import { teamHubActionCommand, teamHubStateAtom } from "~/state/teamHub";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { Alert, AlertDescription } from "../ui/alert";
@@ -204,16 +204,7 @@ function AdminInvites({
 }
 
 function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
-  const query = useMemo(
-    () =>
-      connectionAtomRuntime
-        .atom(readTeamHubState(prepared))
-        .pipe(
-          Atom.swr({ staleTime: 4_000, revalidateOnMount: true }),
-          Atom.withLabel("team-hub-state"),
-        ),
-    [prepared],
-  );
+  const query = teamHubStateAtom({ environmentId: prepared.environmentId, input: {} });
   const result = useAtomValue(query);
   const state = Option.getOrNull(AsyncResult.value(result));
   const [joinLink, setJoinLink] = useState("");
@@ -233,11 +224,6 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
   const sharing = settingUp && reach !== "other";
   const command = useAtomCommand(teamHubActionCommand, { reportFailure: false });
 
-  useEffect(() => {
-    const timer = setInterval(() => appAtomRegistry.refresh(query), 5_000);
-    return () => clearInterval(timer);
-  }, [query]);
-
   const act = async (action: TeamHubAction) => {
     setBusy(true);
     setError(null);
@@ -245,7 +231,6 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
     setBusy(false);
     if (AsyncResult.isSuccess(outcome)) {
       if (action.type === "invite") setInvite(outcome.value as TeamHubInvite);
-      appAtomRegistry.refresh(query);
       if (
         action.type === "decideTask" &&
         action.decision === "accepted" &&
@@ -269,12 +254,7 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
   }
   const snapshot = state.snapshot;
   const self = snapshot?.members.find((member) => member.id === snapshot.selfId);
-  const pendingTasks =
-    snapshot?.tasks.filter(
-      (task) =>
-        task.status === "suggested" &&
-        (task.assigneeId === null || task.assigneeId === snapshot.selfId),
-    ) ?? [];
+  const pendingTasks = incomingTeamHubTasks(snapshot);
   const memberName = (memberId: string) =>
     snapshot?.members.find((member) => member.id === memberId)?.name ?? "Teammate";
 
