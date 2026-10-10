@@ -3,12 +3,16 @@ import {
   parseTeamHubLink,
   readTeamHubInvites,
   readTeamHubState,
+  teamHubActionErrorMessage,
   withTeamHubOrigin,
   type TeamHubAction,
 } from "@t3tools/client-runtime/state/team-hub";
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { TeamHubInvite } from "@t3tools/contracts/teamHub";
 import { isLocalLoopbackHost } from "@t3tools/shared/hostClassification";
+import { useNavigate } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { TriangleAlertIcon } from "lucide-react";
@@ -21,6 +25,7 @@ import { usePrimaryEnvironmentId } from "~/state/environments";
 import { usePreparedConnection } from "~/state/session";
 import { teamHubActionCommand } from "~/state/teamHub";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { buildThreadRouteParams } from "../../threadRoutes";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -217,6 +222,7 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
   const [teamName, setTeamName] = useState("");
   const [repo, setRepo] = useState("");
   const [invite, setInvite] = useState<TeamHubInvite | null>(null);
+  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reach, setReach] = useState<HubReach>("public");
@@ -240,8 +246,21 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
     if (AsyncResult.isSuccess(outcome)) {
       if (action.type === "invite") setInvite(outcome.value as TeamHubInvite);
       appAtomRegistry.refresh(query);
+      if (
+        action.type === "decideTask" &&
+        action.decision === "accepted" &&
+        "threadId" in outcome.value &&
+        outcome.value.threadId !== null
+      ) {
+        void navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(
+            scopeThreadRef(prepared.environmentId, outcome.value.threadId),
+          ),
+        });
+      }
     } else {
-      setError("The team hub request failed. Check the hub address, membership, and connection.");
+      setError(teamHubActionErrorMessage(squashAtomCommandFailure(outcome)));
     }
   };
 
@@ -524,7 +543,7 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
                       <>
                         <Button
                           size="xs"
-                          disabled={busy}
+                          disabled={busy || state.status !== "connected"}
                           onClick={() =>
                             void act({
                               type: "decideTask",

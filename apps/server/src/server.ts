@@ -82,6 +82,7 @@ import * as ServerSettings from "./serverSettings.ts";
 import * as TeamHubNetwork from "./teamHub/TeamHubNetwork.ts";
 import * as TeamHubService from "./teamHub/TeamHubService.ts";
 import { teamHubHttpApiLayer } from "./teamHub/http.ts";
+import * as TeamHubTaskDecisionService from "./teamHub/TeamHubTaskDecisionService.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as AntigravityInstallation from "./provider/AntigravityInstallation.ts";
@@ -623,7 +624,7 @@ const RuntimeCoreDependenciesLive = RuntimeCoreDependenciesBaseLive.pipe(
   ),
 );
 
-const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
+const RuntimeMiscDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(TeamHubServiceLayerLive),
@@ -636,6 +637,11 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(RemoteOpenTargets.layer),
   Layer.provideMerge(ServerLifecycleEvents.layer),
   Layer.provide(NetService.layer),
+);
+
+// Launches threads for accepted team tasks, so it consumes the core services.
+const RuntimeDependenciesLive = TeamHubTaskDecisionService.layer.pipe(
+  Layer.provideMerge(RuntimeMiscDependenciesLive),
 );
 
 const commandReadinessLayer = HttpRouter.middleware(

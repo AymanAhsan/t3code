@@ -29,6 +29,20 @@ export type TeamHubAction =
       readonly decision: "accepted" | "dismissed";
     };
 
+export function teamHubActionErrorMessage(error: unknown): string {
+  if (
+    error !== null &&
+    typeof error === "object" &&
+    "_tag" in error &&
+    error._tag === "EnvironmentRequestInvalidError" &&
+    "reason" in error &&
+    error.reason === "team_hub_project_missing"
+  ) {
+    return "Clone the team repo and add it as a project to accept tasks.";
+  }
+  return error instanceof Error ? error.message : "The team hub request failed.";
+}
+
 export function parseTeamHubLink(value: string): { url: string; token: string } | null {
   try {
     const link = new URL(value);

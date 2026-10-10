@@ -71,6 +71,7 @@ import {
   TeamHubRevokeInviteInput,
   TeamHubState,
   TeamHubTaskDecisionInput,
+  TeamHubTaskDecisionResult,
 } from "./teamHub.ts";
 
 const OptionalBearerHeaders = Schema.Struct({
@@ -92,6 +93,7 @@ export const EnvironmentRequestInvalidReason = Schema.Literals([
   "invalid_scope",
   "scope_not_granted",
   "invalid_command",
+  "team_hub_project_missing",
   "invalid_history_cursor",
 ]);
 export type EnvironmentRequestInvalidReason = typeof EnvironmentRequestInvalidReason.Type;
@@ -684,7 +686,7 @@ class EnvironmentTeamHubHttpApi extends HttpApiGroup.make("teamHub")
     HttpApiEndpoint.post("decideTask", "/api/team-hub/decide-task", {
       headers: OptionalBearerHeaders,
       payload: TeamHubTaskDecisionInput,
-      success: TeamHubState,
+      success: TeamHubTaskDecisionResult,
       error: EnvironmentTeamHubErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   )

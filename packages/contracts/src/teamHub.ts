@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import { ThreadId } from "./baseSchemas.ts";
 
 import { PortSchema } from "./baseSchemas.ts";
 
@@ -177,6 +178,9 @@ export const TeamHubRemoveMemberInput = Schema.Struct({ memberId: Id });
 export const TeamHubTaskDecisionInput = Schema.Struct({
   taskId: Id,
   decision: Schema.Literals(["accepted", "dismissed"]),
+});
+export const TeamHubTaskDecisionResult = Schema.Struct({
+  threadId: Schema.NullOr(ThreadId),
 });
 
 export const TeamHubPublishSummary = Schema.Struct({
