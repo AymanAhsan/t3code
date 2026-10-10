@@ -17,6 +17,8 @@ Invite links are built from the address the admin's app saved when the hub was s
 
 ## Choosing an address
 
+If the hub runs on the same computer as your T3 Code server, **Settings → Integrations → Team hub → Set up a hub** can share it over Tailscale for you, publicly with Funnel or privately on your tailnet. Run the hub, then choose Tailscale there. The steps below are for a hub on another machine, or to do the same by hand.
+
 | Situation                                                | Use                                                                                                                                                      |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Teammates on the same network                            | The host's LAN IP, e.g. `http://192.168.1.20:8080`. No extra software.                                                                                   |

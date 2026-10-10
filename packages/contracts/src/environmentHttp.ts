@@ -58,15 +58,20 @@ import {
   RelayLinkProofRequest,
 } from "./relay.ts";
 import {
+  TeamHubCheckInput,
   TeamHubClientMessage,
   TeamHubInvite,
   TeamHubInviteRecord,
   TeamHubJoinInput,
   TeamHubBootstrapInput,
+  TeamHubNetworkInput,
+  TeamHubNetworkState,
+  TeamHubReachability,
   TeamHubRemoveMemberInput,
   TeamHubRevokeInviteInput,
   TeamHubState,
   TeamHubTaskDecisionInput,
+  TeamHubTaskDecisionResult,
 } from "./teamHub.ts";
 
 const OptionalBearerHeaders = Schema.Struct({
@@ -88,6 +93,7 @@ export const EnvironmentRequestInvalidReason = Schema.Literals([
   "invalid_scope",
   "scope_not_granted",
   "invalid_command",
+  "team_hub_project_missing",
   "invalid_history_cursor",
 ]);
 export type EnvironmentRequestInvalidReason = typeof EnvironmentRequestInvalidReason.Type;
@@ -680,7 +686,41 @@ class EnvironmentTeamHubHttpApi extends HttpApiGroup.make("teamHub")
     HttpApiEndpoint.post("decideTask", "/api/team-hub/decide-task", {
       headers: OptionalBearerHeaders,
       payload: TeamHubTaskDecisionInput,
-      success: TeamHubState,
+      success: TeamHubTaskDecisionResult,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  // The network endpoints are POST even when they only read: each shells out to
+  // the Tailscale CLI, so none of them is cacheable or idempotent to the network.
+  .add(
+    HttpApiEndpoint.post("networkState", "/api/team-hub/network", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubNetworkInput,
+      success: TeamHubNetworkState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("exposeHub", "/api/team-hub/network/expose", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubNetworkInput,
+      success: TeamHubNetworkState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("unexposeHub", "/api/team-hub/network/unexpose", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubNetworkInput,
+      success: TeamHubNetworkState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("checkHub", "/api/team-hub/check", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubCheckInput,
+      success: TeamHubReachability,
       error: EnvironmentTeamHubErrors,
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}

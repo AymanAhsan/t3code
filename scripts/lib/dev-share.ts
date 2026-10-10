@@ -34,6 +34,10 @@ const DIAGNOSTIC_EXPLANATIONS: Record<TailscaleStderrDiagnostic, string | undefi
   "no-existing-handler": "no mapping existed for that port",
   "not-logged-in": "this machine is not logged into a tailnet — run `tailscale up`",
   "permission-denied": "permission denied — `tailscale serve` may need elevated privileges",
+  "daemon-unreachable": "the Tailscale daemon is not running — start Tailscale and try again",
+  "https-disabled":
+    "HTTPS certificates are not enabled for this tailnet — enable them in the Tailscale admin console",
+  "funnel-not-allowed": "this machine is not allowed to use Funnel on this tailnet",
   unknown: undefined,
 };
 

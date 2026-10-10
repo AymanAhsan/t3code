@@ -11,13 +11,17 @@ import {
   failEnvironmentInvalidRequest,
   requireEnvironmentScope,
 } from "../auth/http.ts";
+import * as TeamHubNetwork from "./TeamHubNetwork.ts";
 import * as TeamHubService from "./TeamHubService.ts";
+import * as TeamHubTaskDecisionService from "./TeamHubTaskDecisionService.ts";
 
 export const teamHubHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "teamHub",
   Effect.fnUntraced(function* (handlers) {
     const hub = yield* TeamHubService.TeamHubService;
+    const network = yield* TeamHubNetwork.TeamHubNetwork;
+    const taskDecisions = yield* TeamHubTaskDecisionService.TeamHubTaskDecisionService;
     const state = hub.state;
     return handlers
       .handle(
@@ -109,10 +113,46 @@ export const teamHubHttpApiLayer = HttpApiBuilder.group(
         "decideTask",
         Effect.fn("teamHub.decideTask")(function* ({ payload }) {
           yield* requireEnvironmentScope(AuthAccessWriteScope);
-          yield* hub
-            .decideTask(payload.taskId, payload.decision)
-            .pipe(Effect.catch((cause) => failEnvironmentInternal("internal_error", cause)));
-          return yield* state;
+          return yield* taskDecisions.decideTask(payload.taskId, payload.decision).pipe(
+            Effect.catch((cause) =>
+              Effect.gen(function* () {
+                if (cause.reason === "project_missing") {
+                  return yield* failEnvironmentInvalidRequest("team_hub_project_missing");
+                }
+                return yield* failEnvironmentInternal("internal_error", cause);
+              }),
+            ),
+          );
+        }),
+      )
+      .handle(
+        "networkState",
+        Effect.fn("teamHub.networkState")(function* ({ payload }) {
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          return yield* network.state(payload);
+        }),
+      )
+      .handle(
+        "exposeHub",
+        Effect.fn("teamHub.exposeHub")(function* ({ payload }) {
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          return yield* network.expose(payload);
+        }),
+      )
+      .handle(
+        "unexposeHub",
+        Effect.fn("teamHub.unexposeHub")(function* ({ payload }) {
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          return yield* network.unexpose(payload);
+        }),
+      )
+      .handle(
+        "checkHub",
+        Effect.fn("teamHub.checkHub")(function* ({ payload }) {
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          return yield* network
+            .check(payload.url)
+            .pipe(Effect.catch(() => failEnvironmentInvalidRequest("invalid_command")));
         }),
       );
   }),

@@ -5,11 +5,14 @@ import {
   readTeamHubInvites,
   readTeamHubState,
   runTeamHubAction,
+  teamHubActionErrorMessage,
   type TeamHubAction,
 } from "@t3tools/client-runtime/state/team-hub";
 import { createRuntimeCommand } from "@t3tools/client-runtime/state/runtime";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { TeamHubInvite } from "@t3tools/contracts/teamHub";
 import * as Option from "effect/Option";
+import { CommonActions, useNavigation } from "@react-navigation/native";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, TextInput, View } from "react-native";
@@ -89,6 +92,7 @@ function AdminInvites({
 }
 
 function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
+  const navigation = useNavigation();
   const query = useMemo(
     () =>
       connectionAtomRuntime
@@ -122,7 +126,20 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
     if (AsyncResult.isSuccess(outcome)) {
       if (action.type === "invite") setInvite(outcome.value as TeamHubInvite);
       appAtomRegistry.refresh(query);
-    } else setError("The team hub request failed. Check your connection and membership.");
+      if (
+        action.type === "decideTask" &&
+        action.decision === "accepted" &&
+        "threadId" in outcome.value &&
+        outcome.value.threadId !== null
+      ) {
+        navigation.dispatch(
+          CommonActions.navigate("Thread", {
+            environmentId: prepared.environmentId,
+            threadId: outcome.value.threadId,
+          }),
+        );
+      }
+    } else setError(teamHubActionErrorMessage(squashAtomCommandFailure(outcome)));
   };
   const enroll = () => {
     const parsed = parseTeamHubLink(link);
@@ -266,7 +283,7 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
                     <View className="flex-row gap-2">
                       <Action
                         label="Accept"
-                        disabled={busy}
+                        disabled={busy || state.status !== "connected"}
                         onPress={() =>
                           void act({ type: "decideTask", taskId: task.id, decision: "accepted" })
                         }
