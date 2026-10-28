@@ -50,3 +50,11 @@ Invites expire after 24 hours and admins can revoke them from the Team hub panel
 ## Protocol
 
 The hub requires protocol version 1 for WebSocket connections and responds with HTTP 426 when the client uses a different version.
+
+## Local development with Alice and Bob
+
+Run `vp run dev:team` from the checkout to start a local hub and two web/server sessions. Alice is the team admin and Bob is a member; both join automatically and get a project and initial thread for this checkout. Open each session's labeled pairing URL printed in the terminal. The launcher does not open browsers.
+
+State persists under `.t3/team-demo`, with separate Alice and Bob settings, credentials, and databases. Both projects use the same checkout, so agent edits affect the same files. Press Ctrl+C to stop the hub and both sessions. Use `--hub-port 18080` if port 8080 is occupied, or `--dry-run` to preview the setup without starting it. Session ports move automatically when occupied.
+
+The launcher binds locally and does not change Tailscale configuration. If it was forcibly killed, confirm its processes have stopped and remove `.t3/team-demo/launcher.lock` before restarting.
