@@ -3,7 +3,7 @@ import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import {
   parseTeamHubLink,
   readTeamHubInvites,
-  readTeamHubState,
+  createTeamHubStateAtomFamily,
   runTeamHubAction,
   teamHubActionErrorMessage,
   type TeamHubAction,
@@ -24,6 +24,8 @@ import { usePreparedConnection } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
+
+const teamHubStateAtom = createTeamHubStateAtomFamily(connectionAtomRuntime);
 
 const actionCommand = createRuntimeCommand(connectionAtomRuntime, {
   label: "team hub action",
@@ -93,16 +95,7 @@ function AdminInvites({
 
 function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
   const navigation = useNavigation();
-  const query = useMemo(
-    () =>
-      connectionAtomRuntime
-        .atom(readTeamHubState(prepared))
-        .pipe(
-          Atom.swr({ staleTime: 4_000, revalidateOnMount: true }),
-          Atom.withLabel("mobile-team-hub-state"),
-        ),
-    [prepared],
-  );
+  const query = teamHubStateAtom({ environmentId: prepared.environmentId, input: {} });
   const result = useAtomValue(query);
   const state = Option.getOrNull(AsyncResult.value(result));
   const command = useAtomCommand(actionCommand, { reportFailure: false });
@@ -111,21 +104,19 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
   const [setup, setSetup] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [repo, setRepo] = useState("");
+  const [editingRepo, setEditingRepo] = useState(false);
+  const [repoDraft, setRepoDraft] = useState("");
   const [invite, setInvite] = useState<TeamHubInvite | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    const timer = setInterval(() => appAtomRegistry.refresh(query), 5_000);
-    return () => clearInterval(timer);
-  }, [query]);
   const act = async (action: TeamHubAction) => {
     setBusy(true);
     setError(null);
     const outcome = await command({ prepared, action });
     setBusy(false);
     if (AsyncResult.isSuccess(outcome)) {
+      if (action.type === "updateRepo") setEditingRepo(false);
       if (action.type === "invite") setInvite(outcome.value as TeamHubInvite);
-      appAtomRegistry.refresh(query);
       if (
         action.type === "decideTask" &&
         action.decision === "accepted" &&
@@ -231,7 +222,51 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
           </View>
           {snapshot && (
             <>
-              <Text className="text-foreground-muted">Repository: {snapshot.team.repo}</Text>
+              <View className="gap-2">
+                <Text className="font-t3-medium">GitHub repository</Text>
+                {editingRepo && self?.role === "admin" ? (
+                  <>
+                    <TextInput
+                      accessibilityLabel="GitHub repository"
+                      placeholder="Git remote URL"
+                      value={repoDraft}
+                      onChangeText={setRepoDraft}
+                      maxLength={256}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!busy}
+                      className="rounded-xl bg-grouped-card p-3 text-foreground"
+                    />
+                    <Action
+                      label="Save repository"
+                      disabled={busy || state.status !== "connected" || !repoDraft.trim()}
+                      onPress={() => void act({ type: "updateRepo", repo: repoDraft.trim() })}
+                    />
+                    <Action
+                      label="Cancel"
+                      disabled={busy}
+                      onPress={() => {
+                        setEditingRepo(false);
+                        setError(null);
+                      }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Text className="text-foreground-muted">{snapshot.team.repo}</Text>
+                    {self?.role === "admin" && (
+                      <Action
+                        label="Edit repository"
+                        disabled={busy || state.status !== "connected"}
+                        onPress={() => {
+                          setRepoDraft(snapshot.team.repo);
+                          setEditingRepo(true);
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+              </View>
               <View className="gap-1">
                 <Text className="font-t3-medium">Members</Text>
                 {snapshot.members.map((member) => (

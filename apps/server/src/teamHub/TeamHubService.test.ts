@@ -106,6 +106,12 @@ describe("local team hub connector", () => {
             })
             .pipe(Effect.flip);
           expect(conflict.message).toContain("File already claimed");
+          yield* hub.updateRepo("https://github.com/example/new-repo");
+          const edited = yield* nextState(
+            (state) => state.snapshot?.team.repo === "https://github.com/example/new-repo",
+          );
+          expect(edited.snapshot?.selfId).toBe(member.id);
+          expect(edited.snapshot?.notes[0]?.text).toBe("Ready to pair");
           yield* hub.leave;
           expect(yield* nextState((state) => state.url === null)).toEqual({
             url: null,

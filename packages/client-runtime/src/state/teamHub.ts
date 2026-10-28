@@ -48,6 +48,7 @@ export type TeamHubAction =
   | { readonly type: "publish"; readonly input: TeamHubClientMessage }
   | { readonly type: "invite" }
   | { readonly type: "revokeInvite"; readonly inviteId: string }
+  | { readonly type: "updateRepo"; readonly repo: string }
   | { readonly type: "removeMember"; readonly memberId: string }
   | {
       readonly type: "decideTask";
@@ -216,6 +217,13 @@ export const runTeamHubAction = Effect.fn("clientRuntime.teamHub.action")(functi
         url: (base) => makeEnvironmentHttpApiUrlBuilder(base).teamHub.revokeInvite(),
         request: ({ client, headers }) =>
           client.revokeInvite({ headers, payload: { inviteId: action.inviteId } }),
+      });
+    case "updateRepo":
+      return yield* executeAuthenticatedEnvironmentHttpRequest({
+        ...common,
+        url: (base) => makeEnvironmentHttpApiUrlBuilder(base).teamHub.updateRepo(),
+        request: ({ client, headers }) =>
+          client.updateRepo({ headers, payload: { repo: action.repo } }),
       });
     case "removeMember":
       return yield* executeAuthenticatedEnvironmentHttpRequest({

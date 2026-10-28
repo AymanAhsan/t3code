@@ -174,6 +174,8 @@ export const TeamHubInviteRecord = Schema.Struct({
 export type TeamHubInviteRecord = typeof TeamHubInviteRecord.Type;
 export const TeamHubRevokeInviteInput = Schema.Struct({ inviteId: Id });
 
+export const TeamHubUpdateRepoInput = Schema.Struct({ repo: Text });
+
 export const TeamHubRemoveMemberInput = Schema.Struct({ memberId: Id });
 export const TeamHubTaskDecisionInput = Schema.Struct({
   taskId: Id,

@@ -267,6 +267,13 @@ export class HubStore {
     }
   }
 
+  updateRepo(admin: MemberRow, repo: string) {
+    this.requireAdmin(admin, admin.team_id);
+    const trimmed = repo.trim();
+    if (!trimmed || trimmed.length > 256) throw new HubError("Invalid repository", 400);
+    this.db.prepare("UPDATE teams SET repo=? WHERE id=?").run(trimmed, admin.team_id);
+  }
+
   removeMember(admin: MemberRow, teamId: string, memberId: string) {
     this.requireAdmin(admin, teamId);
     if (admin.id === memberId) throw new HubError("Cannot remove yourself", 400);

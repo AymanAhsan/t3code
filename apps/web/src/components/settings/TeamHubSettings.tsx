@@ -212,6 +212,8 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
   const [settingUp, setSettingUp] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [repo, setRepo] = useState("");
+  const [editingRepo, setEditingRepo] = useState(false);
+  const [repoDraft, setRepoDraft] = useState("");
   const [invite, setInvite] = useState<TeamHubInvite | null>(null);
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
@@ -230,6 +232,7 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
     const outcome = await command({ prepared, action });
     setBusy(false);
     if (AsyncResult.isSuccess(outcome)) {
+      if (action.type === "updateRepo") setEditingRepo(false);
       if (action.type === "invite") setInvite(outcome.value as TeamHubInvite);
       if (
         action.type === "decideTask" &&
@@ -437,7 +440,6 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
     <>
       <SettingsRow
         title={snapshot?.team.name ?? state.url}
-        description={snapshot ? <span className="font-mono">{snapshot.team.repo}</span> : undefined}
         status={
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -464,6 +466,69 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
       />
       {snapshot && (
         <>
+          <SettingsRow
+            title="GitHub repository"
+            description="The repository whose checkpoints are shared with this team."
+            control={
+              self?.role === "admin" && !editingRepo ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || state.status !== "connected"}
+                  onClick={() => {
+                    setRepoDraft(snapshot.team.repo);
+                    setEditingRepo(true);
+                  }}
+                >
+                  Edit repository
+                </Button>
+              ) : undefined
+            }
+          >
+            {editingRepo && self?.role === "admin" ? (
+              <form
+                className="space-y-2 pt-3 pb-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (repoDraft.trim()) void act({ type: "updateRepo", repo: repoDraft.trim() });
+                }}
+              >
+                <Input
+                  size="sm"
+                  aria-label="GitHub repository"
+                  placeholder="Git remote URL"
+                  value={repoDraft}
+                  maxLength={256}
+                  disabled={busy}
+                  onChange={(event) => setRepoDraft(event.target.value)}
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={busy || state.status !== "connected" || !repoDraft.trim()}
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      setEditingRepo(false);
+                      setError(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <p className="py-2 font-mono text-xs break-all">{snapshot.team.repo}</p>
+            )}
+          </SettingsRow>
           <SettingsRow title="Members">
             <HubList>
               {snapshot.members.map((member) => (

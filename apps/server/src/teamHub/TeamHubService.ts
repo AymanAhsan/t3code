@@ -62,6 +62,7 @@ export class TeamHubService extends Context.Service<
     >;
     readonly listInvites: Effect.Effect<ReadonlyArray<TeamHubInviteRecord>, TeamHubError>;
     readonly revokeInvite: (inviteId: string) => Effect.Effect<void, TeamHubError>;
+    readonly updateRepo: (repo: string) => Effect.Effect<void, TeamHubError>;
     readonly removeMember: (memberId: string) => Effect.Effect<void, TeamHubError>;
     readonly decideTask: (
       taskId: string,
@@ -350,6 +351,7 @@ const make = Effect.gen(function* () {
     createInvite: request("/api/invites", {}),
     listInvites: request("/api/invites"),
     revokeInvite: (inviteId) => request("/api/invites/revoke", { inviteId }),
+    updateRepo: (repo) => request("/api/team/repo", { repo }),
     removeMember: (memberId) => request("/api/members/remove", { memberId }),
     decideTask: (taskId, decision) => request("/api/tasks/decide", { taskId, decision }),
   });

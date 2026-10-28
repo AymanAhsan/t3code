@@ -4,7 +4,7 @@ A team hub shares short coordination updates between teammates while each person
 
 To join, paste the invite link from your team admin into **Settings → Integrations → Team hub**, choose a display name, and select **Join team**. The linked Git repository determines which project checkpoints are shared. Your local server reconnects to the hub automatically when available. You can leave from the same panel. If the hub is on Tailscale and your computer can't reach it, the panel says why, for example that Tailscale is turned off. **Check connection** runs the same check later.
 
-Team admins can create 24-hour, single-use invites and remove members in that panel. Agents can read the team inbox, post notes or suggested tasks, claim files, and list interface changes with the team MCP tools.
+Team admins can create 24-hour, single-use invites and remove members in that panel. To change the linked repository, select **Edit repository**, enter its Git remote URL, and save. The change applies to the whole team; teammates need the new repository added as a project to accept its tasks. Agents can read the team inbox, post notes or suggested tasks, claim files, and list interface changes with the team MCP tools.
 
 To create a self-hosted team, [run a hub server](../operations/team-hub.md), then open **Set up a hub** in the Team hub panel and choose how teammates will reach it. Paste the hub's one-time setup link, then enter the team's name, Git remote URL, and your display name.
 

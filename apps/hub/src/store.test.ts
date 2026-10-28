@@ -33,6 +33,31 @@ describe("team hub store", () => {
     configured.close();
   });
 
+  it("persists admin repository edits without changing membership or coordination history", () => {
+    const { dir, store } = open();
+    const admin = store.bootstrap(store.setupToken!, "Engineering", "old-repo", "Alice");
+    const alice = store.authenticate(admin.credential);
+    const bob = store.join(store.createInvite(alice, admin.team.id).token, "Bob");
+    const member = store.authenticate(bob.credential);
+    store.publish(alice, { type: "post_note", text: "Keep this note" });
+    expect(() => store.updateRepo(member, "unauthorized-repo")).toThrow("Admin required");
+    for (const invalid of ["", "   ", "x".repeat(257)]) {
+      expect(() => store.updateRepo(alice, invalid)).toThrow("Invalid repository");
+    }
+    expect(store.snapshot(alice, new Set()).team.repo).toBe("old-repo");
+    store.updateRepo(alice, " https://github.com/example/new-repo ");
+    store.close();
+    const reopened = new HubStore(dir);
+    try {
+      const snapshot = reopened.snapshot(reopened.authenticate(bob.credential), new Set());
+      expect(snapshot.team).toEqual({ ...admin.team, repo: "https://github.com/example/new-repo" });
+      expect(snapshot.members).toHaveLength(2);
+      expect(snapshot.notes[0]?.text).toBe("Keep this note");
+    } finally {
+      reopened.close();
+    }
+  });
+
   it("uses expiring single-use invites and revocable credentials", () => {
     const { store } = open();
     const admin = store.bootstrap(

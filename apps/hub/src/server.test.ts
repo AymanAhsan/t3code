@@ -54,7 +54,7 @@ describe("team hub server", () => {
     }
   });
 
-  it("lets two members see presence and a published summary over outbound sockets", async () => {
+  it("syncs presence, summaries, and admin repository edits to connected teammates", async () => {
     const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-team-hub-socket-"));
     dirs.push(dir);
     const store = new HubStore(dir);
@@ -84,6 +84,26 @@ describe("team hub server", () => {
       await bobInitial;
       const presence = (await alicePresence) as { snapshot: { members: { online: boolean }[] } };
       expect(presence.snapshot.members.every((member) => member.online)).toBe(true);
+      const updateRepo = (credential: string, repo: unknown) =>
+        fetch(`http://127.0.0.1:${server.port}/api/team/repo`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" },
+          body: JSON.stringify({ repo }),
+        });
+      expect((await updateRepo(bob.credential, "forbidden")).status).toBe(403);
+      for (const invalid of [null, "   ", "x".repeat(257)]) {
+        expect((await updateRepo(admin.credential, invalid)).status).toBe(400);
+      }
+      const aliceRepo = nextMessage(aliceSocket);
+      const bobRepo = nextMessage(bobSocket);
+      expect(
+        (await updateRepo(admin.credential, "https://github.com/example/new-repo")).status,
+      ).toBe(200);
+      for (const update of await Promise.all([aliceRepo, bobRepo])) {
+        expect(update).toMatchObject({
+          snapshot: { team: { repo: "https://github.com/example/new-repo" } },
+        });
+      }
       const bobSummary = nextMessage(bobSocket);
       aliceSocket.send(
         JSON.stringify({
