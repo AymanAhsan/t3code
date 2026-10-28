@@ -4,13 +4,39 @@ import type {
   TeamHubJoinInput,
   TeamHubBootstrapInput,
   TeamHubNetworkInput,
+  TeamHubSnapshot,
 } from "@t3tools/contracts/teamHub";
 import * as Effect from "effect/Effect";
+import { WS_METHODS } from "@t3tools/contracts";
+import { Atom } from "effect/unstable/reactivity";
+import type { EnvironmentRegistry } from "../connection/registry.ts";
+import { createEnvironmentRpcSubscriptionAtomFamily } from "./runtime.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import { makeEnvironmentHttpApiUrlBuilder } from "../rpc/http.ts";
 import { executeAuthenticatedEnvironmentHttpRequest } from "./environmentHttpAuth.ts";
+
+/** Uses the environment's existing RPC session, including reconnection. */
+export function createTeamHubStateAtomFamily<R, E>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
+) {
+  return createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "environment-data:team-hub",
+    tag: WS_METHODS.subscribeTeamHubState,
+  });
+}
+
+/** Tasks this environment's member can accept, oldest first. */
+export function incomingTeamHubTasks(snapshot: TeamHubSnapshot | null) {
+  return (
+    snapshot?.tasks.filter(
+      (task) =>
+        task.status === "suggested" &&
+        (task.assigneeId === null || task.assigneeId === snapshot.selfId),
+    ) ?? []
+  ).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+}
 
 export type TeamHubAction =
   | { readonly type: "join"; readonly input: TeamHubJoinInput }
@@ -73,25 +99,6 @@ export function withTeamHubOrigin(
     return null;
   }
 }
-
-export const readTeamHubState = Effect.fn("clientRuntime.teamHub.readState")(function* (
-  prepared: PreparedConnection,
-) {
-  const signer = yield* Effect.serviceOption(ManagedRelay.ManagedRelayDpopSigner);
-  const remoteAuthorization = yield* Effect.serviceOption(
-    RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization,
-  );
-  return yield* executeAuthenticatedEnvironmentHttpRequest({
-    prepared,
-    signer,
-    remoteAuthorization,
-    group: "teamHub",
-    method: "GET",
-    url: (base) => makeEnvironmentHttpApiUrlBuilder(base).teamHub.state(),
-    timeoutMs: 8_000,
-    request: ({ client, headers }) => client.state({ headers }),
-  });
-});
 
 export const readTeamHubInvites = Effect.fn("clientRuntime.teamHub.readInvites")(function* (
   prepared: PreparedConnection,

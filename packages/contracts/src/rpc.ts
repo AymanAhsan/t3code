@@ -1,4 +1,5 @@
 import { OrchestrationDispatchCommandError } from "./orchestrationDispatch.ts";
+import { TeamHubState } from "./teamHub.ts";
 import {
   ChatGptReconnectProfileInput,
   ChatGptReconnectProfile,
@@ -530,6 +531,7 @@ export const WS_METHODS = {
   subscribeDeviceState: "subscribeDeviceState",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
+  subscribeTeamHubState: "subscribeTeamHubState",
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
@@ -1585,6 +1587,13 @@ const WsOrchestrationV2SubscribeThreadRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS
   stream: true,
 });
 
+const WsSubscribeTeamHubStateRpc = Rpc.make(WS_METHODS.subscribeTeamHubState, {
+  payload: Schema.Struct({}),
+  success: TeamHubState,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
@@ -1836,6 +1845,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalCloseRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeTerminalMetadataRpc,
+  WsSubscribeTeamHubStateRpc,
   WsPreviewOpenRpc,
   WsPreviewNavigateRpc,
   WsPreviewResizeRpc,

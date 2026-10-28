@@ -434,6 +434,7 @@ import {
   resolveScrollToEndClearance,
 } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import { IncomingTeamHubTask } from "./chat/IncomingTeamHubTask";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
@@ -10908,6 +10909,8 @@ export default function ChatView(props: ChatViewProps) {
               : {})}
           />
         </header>
+
+        <IncomingTeamHubTask environmentId={activeThread.environmentId} />
 
         {/* Main content area with optional plan sidebar */}
         <div className="relative flex min-h-0 min-w-0 flex-1">
