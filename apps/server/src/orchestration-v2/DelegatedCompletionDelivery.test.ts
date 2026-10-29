@@ -122,6 +122,7 @@ const TestLayer = Layer.mergeAll(OrchestrationV2LayerLive, OrchestrationV2EventS
           repositoryIdentityResolved: false,
         }),
       request: () => Effect.void,
+      resolveRepositoryIdentity: () => Effect.succeed(null),
       getAvailable: () =>
         Effect.succeed({
           repositoryIdentity: null,

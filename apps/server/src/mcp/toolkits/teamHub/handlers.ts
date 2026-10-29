@@ -19,7 +19,16 @@ const snapshot = (projectId: ProjectId) =>
       });
     }
     const projects = yield* ProjectService.ProjectService;
-    const project = yield* projects.getShell(projectId).pipe(Effect.mapError(unavailable));
+    const project = yield* projects
+      .getShell(projectId, { resolveRepositoryIdentity: true })
+      .pipe(Effect.mapError(unavailable));
+    if (Option.isSome(project) && project.value.repositoryIdentity === null) {
+      return yield* new OrchestratorMcpFailure({
+        code: "provider_unavailable",
+        message:
+          "The calling project's Git repository identity could not be resolved. Check that Git can read the repository and its remote.",
+      });
+    }
     if (
       Option.isNone(project) ||
       project.value.repositoryIdentity?.canonicalKey !==

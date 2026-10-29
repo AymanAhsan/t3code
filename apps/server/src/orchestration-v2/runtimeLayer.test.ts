@@ -407,6 +407,7 @@ const SharedApplicationDataPlaneTestLayer = Layer.mergeAll(
           repositoryIdentityResolved: false,
         }),
       request: () => Effect.void,
+      resolveRepositoryIdentity: () => Effect.succeed(null),
       getAvailable: () =>
         Effect.succeed({
           repositoryIdentity: null,

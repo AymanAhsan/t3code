@@ -572,7 +572,17 @@ it.effect(
         const immediateSnapshot = yield* Fiber.join(snapshotFiber);
         assert.isNull(immediateSnapshot.projects[0]?.repositoryIdentity ?? null);
 
+        const resolvedShellFiber = yield* service
+          .getShell(projectId, { resolveRepositoryIdentity: true })
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        assert.isUndefined(resolvedShellFiber.pollUnsafe());
+
         yield* Deferred.succeed(releaseRepository, undefined);
+        const resolvedShell = Option.getOrThrow(yield* Fiber.join(resolvedShellFiber));
+        assert.equal(
+          resolvedShell.repositoryIdentity?.canonicalKey,
+          "github.com/t3tools/slow-project",
+        );
 
         const firstProject = yield* waitForProject(
           service,
@@ -589,9 +599,19 @@ it.effect(
         const byId = Option.getOrThrow(yield* service.getById(projectId));
         const secondSnapshot = yield* service.snapshot;
         assert.equal(byId.repositoryIdentity?.canonicalKey, "github.com/t3tools/slow-project");
-        assert.equal(secondSnapshot.projects[0]?.faviconPath, "/work/slow-enrichment/favicon.svg");
+
         assert.equal(yield* Ref.get(repositoryCalls), 1);
         assert.equal(yield* Ref.get(faviconCalls), 1);
+        yield* TestClock.adjust("2 minutes");
+        const afterExpiry = Option.getOrThrow(
+          yield* service.getShell(projectId, { resolveRepositoryIdentity: true }),
+        );
+        assert.equal(
+          afterExpiry.repositoryIdentity?.canonicalKey,
+          "github.com/t3tools/slow-project",
+        );
+        assert.equal(secondSnapshot.projects[0]?.faviconPath, "/work/slow-enrichment/favicon.svg");
+        assert.equal(yield* Ref.get(repositoryCalls), 2);
       }).pipe(Effect.provide(makeTestLayer(slowMetadataLayer)));
     }),
 );

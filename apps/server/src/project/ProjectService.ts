@@ -132,10 +132,11 @@ export class ProjectService extends Context.Service<
     readonly snapshot: Effect.Effect<ProjectSnapshot, ProjectOperationError>;
     /**
      * An active project's shell with its immediately available repository
-     * identity; missing identity resolves in the background.
+     * identity; missing identity resolves in the background unless explicitly awaited.
      */
     readonly getShell: (
       projectId: ProjectId,
+      options?: { readonly resolveRepositoryIdentity?: boolean },
     ) => Effect.Effect<Option.Option<OrchestrationProjectShell>, ProjectOperationError>;
     /** Active project shells, enriched like `getShell`, in creation order. */
     readonly listShells: (options?: {
@@ -514,7 +515,7 @@ export const make = Effect.gen(function* () {
     );
 
   const getShell: ProjectService["Service"]["getShell"] = Effect.fn("ProjectService.getShell")(
-    function* (projectId) {
+    function* (projectId, options) {
       const shell = yield* projects
         .getShell(projectId)
         .pipe(
@@ -522,7 +523,17 @@ export const make = Effect.gen(function* () {
             (cause) => new ProjectOperationError({ operation: "read-project", projectId, cause }),
           ),
         );
-      return Option.isNone(shell) ? shell : Option.some(yield* enrichShell(shell.value));
+      if (Option.isNone(shell)) return shell;
+      return Option.some(
+        options?.resolveRepositoryIdentity
+          ? {
+              ...shell.value,
+              repositoryIdentity: yield* projectEnrichment.resolveRepositoryIdentity(
+                shell.value.workspaceRoot,
+              ),
+            }
+          : yield* enrichShell(shell.value),
+      );
     },
   );
 
