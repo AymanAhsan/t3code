@@ -1,9 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import {
+  formatTeamHubContract,
+  parseTeamHubDomains,
   parseTeamHubLink,
   readTeamHubInvites,
-  readTeamHubState,
+  createTeamHubStateAtomFamily,
   runTeamHubAction,
   teamHubActionErrorMessage,
   type TeamHubAction,
@@ -24,6 +26,8 @@ import { usePreparedConnection } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
+
+const teamHubStateAtom = createTeamHubStateAtomFamily(connectionAtomRuntime);
 
 const actionCommand = createRuntimeCommand(connectionAtomRuntime, {
   label: "team hub action",
@@ -93,16 +97,7 @@ function AdminInvites({
 
 function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
   const navigation = useNavigation();
-  const query = useMemo(
-    () =>
-      connectionAtomRuntime
-        .atom(readTeamHubState(prepared))
-        .pipe(
-          Atom.swr({ staleTime: 4_000, revalidateOnMount: true }),
-          Atom.withLabel("mobile-team-hub-state"),
-        ),
-    [prepared],
-  );
+  const query = teamHubStateAtom({ environmentId: prepared.environmentId, input: {} });
   const result = useAtomValue(query);
   const state = Option.getOrNull(AsyncResult.value(result));
   const command = useAtomCommand(actionCommand, { reportFailure: false });
@@ -111,21 +106,22 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
   const [setup, setSetup] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [repo, setRepo] = useState("");
+  const [editingRepo, setEditingRepo] = useState(false);
+  const [repoDraft, setRepoDraft] = useState("");
+  const [editingAreas, setEditingAreas] = useState(false);
+  const [areasDraft, setAreasDraft] = useState("");
   const [invite, setInvite] = useState<TeamHubInvite | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    const timer = setInterval(() => appAtomRegistry.refresh(query), 5_000);
-    return () => clearInterval(timer);
-  }, [query]);
   const act = async (action: TeamHubAction) => {
     setBusy(true);
     setError(null);
     const outcome = await command({ prepared, action });
     setBusy(false);
     if (AsyncResult.isSuccess(outcome)) {
+      if (action.type === "updateRepo") setEditingRepo(false);
+      if (action.type === "publish" && action.input.type === "set_domains") setEditingAreas(false);
       if (action.type === "invite") setInvite(outcome.value as TeamHubInvite);
-      appAtomRegistry.refresh(query);
       if (
         action.type === "decideTask" &&
         action.decision === "accepted" &&
@@ -231,7 +227,51 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
           </View>
           {snapshot && (
             <>
-              <Text className="text-foreground-muted">Repository: {snapshot.team.repo}</Text>
+              <View className="gap-2">
+                <Text className="font-t3-medium">GitHub repository</Text>
+                {editingRepo && self?.role === "admin" ? (
+                  <>
+                    <TextInput
+                      accessibilityLabel="GitHub repository"
+                      placeholder="Git remote URL"
+                      value={repoDraft}
+                      onChangeText={setRepoDraft}
+                      maxLength={256}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!busy}
+                      className="rounded-xl bg-grouped-card p-3 text-foreground"
+                    />
+                    <Action
+                      label="Save repository"
+                      disabled={busy || state.status !== "connected" || !repoDraft.trim()}
+                      onPress={() => void act({ type: "updateRepo", repo: repoDraft.trim() })}
+                    />
+                    <Action
+                      label="Cancel"
+                      disabled={busy}
+                      onPress={() => {
+                        setEditingRepo(false);
+                        setError(null);
+                      }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Text className="text-foreground-muted">{snapshot.team.repo}</Text>
+                    {self?.role === "admin" && (
+                      <Action
+                        label="Edit repository"
+                        disabled={busy || state.status !== "connected"}
+                        onPress={() => {
+                          setRepoDraft(snapshot.team.repo);
+                          setEditingRepo(true);
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+              </View>
               <View className="gap-1">
                 <Text className="font-t3-medium">Members</Text>
                 {snapshot.members.map((member) => (
@@ -240,6 +280,9 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
                       {member.online ? "●" : "○"} {member.name}
                       {member.id === snapshot.selfId ? " (you)" : ""}
                     </Text>
+                    {member.domains.length > 0 && (
+                      <Text className="text-foreground-muted">{member.domains.join(", ")}</Text>
+                    )}
                     {self?.role === "admin" && member.id !== snapshot.selfId && (
                       <Action
                         label={`Remove ${member.name}`}
@@ -249,6 +292,55 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
                     )}
                   </View>
                 ))}
+              </View>
+              <View className="gap-2">
+                <Text className="font-t3-medium">Your areas</Text>
+                <Text className="text-foreground-muted">
+                  Repository paths you own, such as apps/api/**. Teammates' agents send tasks for
+                  these paths to you.
+                </Text>
+                {editingAreas ? (
+                  <>
+                    <TextInput
+                      accessibilityLabel="Your areas"
+                      placeholder={"apps/api/**\npackages/contracts/**"}
+                      value={areasDraft}
+                      onChangeText={setAreasDraft}
+                      multiline
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!busy}
+                      className="rounded-xl bg-grouped-card p-3 text-foreground"
+                    />
+                    <Action
+                      label="Save areas"
+                      disabled={busy || state.status !== "connected"}
+                      onPress={() =>
+                        void act({
+                          type: "publish",
+                          input: { type: "set_domains", domains: parseTeamHubDomains(areasDraft) },
+                        })
+                      }
+                    />
+                    <Action
+                      label="Cancel"
+                      disabled={busy}
+                      onPress={() => {
+                        setEditingAreas(false);
+                        setError(null);
+                      }}
+                    />
+                  </>
+                ) : (
+                  <Action
+                    label="Edit areas"
+                    disabled={busy || state.status !== "connected"}
+                    onPress={() => {
+                      setAreasDraft(self?.domains.join("\n") ?? "");
+                      setEditingAreas(true);
+                    }}
+                  />
+                )}
               </View>
               {self?.role === "admin" && (
                 <View className="gap-2">
@@ -280,6 +372,11 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
                 {tasks.map((task) => (
                   <View key={task.id} className="gap-2 rounded-xl bg-grouped-card p-3">
                     <Text>{task.text}</Text>
+                    {task.contract !== null && (
+                      <Text className="text-foreground-muted">
+                        Contract: {formatTeamHubContract(task.contract)}
+                      </Text>
+                    )}
                     <View className="flex-row gap-2">
                       <Action
                         label="Accept"

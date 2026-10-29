@@ -7,6 +7,7 @@ import type {
   TeamHubClaim,
   TeamHubClientMessage,
   TeamHubContractChange,
+  TeamHubContractRef,
   TeamHubMember,
   TeamHubNote,
   TeamHubSnapshot,
@@ -16,6 +17,7 @@ import type {
 
 type TeamRow = { id: string; name: string; repo: string };
 type MemberRow = { id: string; team_id: string; name: string; role: "admin" | "member" };
+type MemberListRow = MemberRow & { domains_json: string };
 type SummaryRow = {
   id: string;
   member_id: string;
@@ -30,6 +32,7 @@ type TaskRow = {
   assignee_id: string | null;
   text: string;
   status: "suggested" | "accepted" | "dismissed";
+  contract_json: string | null;
   created_at: number;
 };
 type NoteRow = { id: string; member_id: string; text: string; created_at: number };
@@ -106,6 +109,9 @@ export class HubStore {
       );
       CREATE INDEX IF NOT EXISTS contracts_team ON contract_changes(team_id, created_at DESC);
     `);
+    // Columns added after the first release. Older hub databases gain them on startup.
+    this.addColumnIfMissing("members", "domains_json", "TEXT NOT NULL DEFAULT '[]'");
+    this.addColumnIfMissing("tasks", "contract_json", "TEXT");
     const storedKey = this.db.prepare("SELECT value FROM meta WHERE key='signing_key'").get() as
       | { value: string }
       | undefined;
@@ -134,6 +140,13 @@ export class HubStore {
 
   close() {
     this.db.close();
+  }
+
+  private addColumnIfMissing(table: string, column: string, definition: string) {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!columns.some((info) => info.name === column)) {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
   }
 
   bootstrap(token: string, name: string, repo: string, displayName: string) {
@@ -267,6 +280,13 @@ export class HubStore {
     }
   }
 
+  updateRepo(admin: MemberRow, repo: string) {
+    this.requireAdmin(admin, admin.team_id);
+    const trimmed = repo.trim();
+    if (!trimmed || trimmed.length > 256) throw new HubError("Invalid repository", 400);
+    this.db.prepare("UPDATE teams SET repo=? WHERE id=?").run(trimmed, admin.team_id);
+  }
+
   removeMember(admin: MemberRow, teamId: string, memberId: string) {
     this.requireAdmin(admin, teamId);
     if (admin.id === memberId) throw new HubError("Cannot remove yourself", 400);
@@ -288,8 +308,10 @@ export class HubStore {
       .prepare("SELECT id,name,repo FROM teams WHERE id=?")
       .get(member.team_id) as TeamRow;
     const members = this.db
-      .prepare("SELECT id,team_id,name,role FROM members WHERE team_id=? AND revoked_at IS NULL")
-      .all(member.team_id) as MemberRow[];
+      .prepare(
+        "SELECT id,team_id,name,role,domains_json FROM members WHERE team_id=? AND revoked_at IS NULL",
+      )
+      .all(member.team_id) as MemberListRow[];
     const summaries = this.db
       .prepare(
         "SELECT id,member_id,branch,files_json,description,created_at FROM summaries WHERE team_id=? ORDER BY created_at DESC LIMIT 50",
@@ -297,7 +319,7 @@ export class HubStore {
       .all(member.team_id) as SummaryRow[];
     const tasks = this.db
       .prepare(
-        "SELECT id,author_id,assignee_id,text,status,created_at FROM tasks WHERE team_id=? ORDER BY created_at DESC LIMIT 100",
+        "SELECT id,author_id,assignee_id,text,status,contract_json,created_at FROM tasks WHERE team_id=? ORDER BY created_at DESC LIMIT 100",
       )
       .all(member.team_id) as TaskRow[];
     const notes = this.db
@@ -323,6 +345,7 @@ export class HubStore {
         name: row.name,
         role: row.role,
         online: onlineIds.has(row.id),
+        domains: JSON.parse(row.domains_json) as string[],
       })),
       summaries: summaries.map((row): TeamHubSummary => ({
         id: row.id,
@@ -338,6 +361,8 @@ export class HubStore {
         assigneeId: row.assignee_id,
         text: row.text,
         status: row.status,
+        contract:
+          row.contract_json === null ? null : (JSON.parse(row.contract_json) as TeamHubContractRef),
         createdAt: row.created_at,
       })),
       notes: notes.map((row): TeamHubNote => ({
@@ -388,7 +413,9 @@ export class HubStore {
           throw new HubError("Assignee not in team", 400);
         }
         this.db
-          .prepare("INSERT INTO tasks VALUES (?,?,?,?,?,?,?)")
+          .prepare(
+            "INSERT INTO tasks (id,team_id,author_id,assignee_id,text,status,contract_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
+          )
           .run(
             id,
             member.team_id,
@@ -396,6 +423,7 @@ export class HubStore {
             message.assigneeId,
             message.text,
             "suggested",
+            message.contract === null ? null : JSON.stringify(message.contract),
             createdAt,
           );
         break;
@@ -444,6 +472,11 @@ export class HubStore {
             JSON.stringify(message.paths),
             createdAt,
           );
+        break;
+      case "set_domains":
+        this.db
+          .prepare("UPDATE members SET domains_json=? WHERE id=? AND team_id=?")
+          .run(JSON.stringify([...new Set(message.domains)]), member.id, member.team_id);
         break;
     }
   }

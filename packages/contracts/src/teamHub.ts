@@ -3,16 +3,20 @@ import { ThreadId } from "./baseSchemas.ts";
 
 import { PortSchema } from "./baseSchemas.ts";
 
-export const TEAM_HUB_PROTOCOL_VERSION = 1;
+export const TEAM_HUB_PROTOCOL_VERSION = 2;
 
 const Text = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/));
+
+/** Repository path globs a member owns, such as `apps/api/**`. Used to route tasks. */
+export const TeamHubDomains = Schema.Array(Text).check(Schema.isMaxLength(20));
 
 export const TeamHubMember = Schema.Struct({
   id: Id,
   name: Text,
   role: Schema.Literals(["admin", "member"]),
   online: Schema.Boolean,
+  domains: TeamHubDomains,
 });
 export type TeamHubMember = typeof TeamHubMember.Type;
 
@@ -26,12 +30,21 @@ export const TeamHubSummary = Schema.Struct({
 });
 export type TeamHubSummary = typeof TeamHubSummary.Type;
 
+/** Points at the contract file both sides build against, pinned to a pushed commit. */
+export const TeamHubContractRef = Schema.Struct({
+  branch: Text,
+  path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+  sha: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/)),
+});
+export type TeamHubContractRef = typeof TeamHubContractRef.Type;
+
 export const TeamHubTask = Schema.Struct({
   id: Id,
   authorId: Id,
   assigneeId: Schema.NullOr(Id),
   text: Text,
   status: Schema.Literals(["suggested", "accepted", "dismissed"]),
+  contract: Schema.NullOr(TeamHubContractRef),
   createdAt: Schema.Number,
 });
 export type TeamHubTask = typeof TeamHubTask.Type;
@@ -174,6 +187,10 @@ export const TeamHubInviteRecord = Schema.Struct({
 export type TeamHubInviteRecord = typeof TeamHubInviteRecord.Type;
 export const TeamHubRevokeInviteInput = Schema.Struct({ inviteId: Id });
 
+export const TeamHubUpdateRepoInput = Schema.Struct({ repo: Text });
+
+export const TeamHubSetDomainsInput = Schema.Struct({ domains: TeamHubDomains });
+
 export const TeamHubRemoveMemberInput = Schema.Struct({ memberId: Id });
 export const TeamHubTaskDecisionInput = Schema.Struct({
   taskId: Id,
@@ -195,6 +212,7 @@ export const TeamHubPostTask = Schema.Struct({
   type: Schema.Literal("post_task"),
   assigneeId: Schema.NullOr(Id),
   text: Text,
+  contract: Schema.NullOr(TeamHubContractRef),
 });
 export type TeamHubPostTask = typeof TeamHubPostTask.Type;
 
@@ -223,6 +241,12 @@ export const TeamHubPostContractChange = Schema.Struct({
 });
 export type TeamHubPostContractChange = typeof TeamHubPostContractChange.Type;
 
+export const TeamHubSetDomains = Schema.Struct({
+  type: Schema.Literal("set_domains"),
+  domains: TeamHubDomains,
+});
+export type TeamHubSetDomains = typeof TeamHubSetDomains.Type;
+
 export const TeamHubClientMessage = Schema.Union([
   TeamHubPublishSummary,
   TeamHubPostTask,
@@ -230,5 +254,6 @@ export const TeamHubClientMessage = Schema.Union([
   TeamHubClaimFiles,
   TeamHubReleaseFiles,
   TeamHubPostContractChange,
+  TeamHubSetDomains,
 ]);
 export type TeamHubClientMessage = typeof TeamHubClientMessage.Type;

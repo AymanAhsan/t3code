@@ -3,6 +3,7 @@ import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as ProjectService from "../../../project/ProjectService.ts";
+import * as TeamHubDelegationService from "../../../teamHub/TeamHubDelegationService.ts";
 import * as TeamHubService from "../../../teamHub/TeamHubService.ts";
 import { readCaller, readMutationCaller, unavailable } from "../../threadAccess.ts";
 import { TeamHubToolkit } from "./tools.ts";
@@ -48,19 +49,47 @@ export const TeamHubHandlersLive = TeamHubToolkit.toLayer({
         ),
       };
     }),
-  team_post: ({ text, kind, assigneeId }) =>
+  team_post: ({ text, kind, assigneeId, contract }) =>
+    Effect.gen(function* () {
+      const { caller } = yield* readMutationCaller();
+      yield* snapshot(caller.projectId);
+      if (kind === "note") {
+        if (contract !== undefined) {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "A contract can only be attached to a task.",
+          });
+        }
+        const hub = yield* TeamHubService.TeamHubService;
+        yield* hub.publish({ type: "post_note", text }).pipe(Effect.mapError(unavailable));
+        return { posted: true, assigneeId: null };
+      }
+      const delegation = yield* TeamHubDelegationService.TeamHubDelegationService;
+      const posted = yield* delegation
+        .postTask({
+          projectId: caller.projectId,
+          text,
+          assigneeId: assigneeId ?? null,
+          contract: contract ?? null,
+        })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new OrchestratorMcpFailure({
+                code: error.reason === "hub_failed" ? "orchestration_error" : "invalid_request",
+                message: error.message,
+              }),
+          ),
+        );
+      return { posted: true, assigneeId: posted.assigneeId };
+    }),
+  team_set_domains: ({ domains }) =>
     Effect.gen(function* () {
       const { caller } = yield* readMutationCaller();
       const hub = yield* TeamHubService.TeamHubService;
       yield* snapshot(caller.projectId);
-      yield* hub
-        .publish(
-          kind === "note"
-            ? { type: "post_note", text }
-            : { type: "post_task", text, assigneeId: assigneeId ?? null },
-        )
-        .pipe(Effect.mapError(unavailable));
-      return { posted: true };
+      yield* hub.publish({ type: "set_domains", domains }).pipe(Effect.mapError(unavailable));
+      return { sent: true };
     }),
   claim_files: ({ paths, action }) =>
     Effect.gen(function* () {

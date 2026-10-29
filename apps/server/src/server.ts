@@ -82,6 +82,7 @@ import * as ServerSettings from "./serverSettings.ts";
 import * as TeamHubNetwork from "./teamHub/TeamHubNetwork.ts";
 import * as TeamHubService from "./teamHub/TeamHubService.ts";
 import { teamHubHttpApiLayer } from "./teamHub/http.ts";
+import * as TeamHubDelegationService from "./teamHub/TeamHubDelegationService.ts";
 import * as TeamHubTaskDecisionService from "./teamHub/TeamHubTaskDecisionService.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
@@ -640,9 +641,10 @@ const RuntimeMiscDependenciesLive = RuntimeCoreDependenciesLive.pipe(
 );
 
 // Launches threads for accepted team tasks, so it consumes the core services.
-const RuntimeDependenciesLive = TeamHubTaskDecisionService.layer.pipe(
-  Layer.provideMerge(RuntimeMiscDependenciesLive),
-);
+const RuntimeDependenciesLive = Layer.mergeAll(
+  TeamHubTaskDecisionService.layer,
+  TeamHubDelegationService.layer,
+).pipe(Layer.provideMerge(RuntimeMiscDependenciesLive));
 
 const commandReadinessLayer = HttpRouter.middleware(
   (httpEffect) =>

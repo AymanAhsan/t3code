@@ -78,7 +78,12 @@ describe("local team hub connector", () => {
           const member = store.authenticate(credential);
           const connected = yield* nextState((state) => state.status === "connected");
           expect(connected.snapshot?.selfId).toBe(member.id);
-          yield* hub.publish({ type: "post_task", assigneeId: member.id, text: "Review the API" });
+          yield* hub.publish({
+            type: "post_task",
+            assigneeId: member.id,
+            text: "Review the API",
+            contract: null,
+          });
           const suggested = yield* nextState((state) => state.snapshot?.tasks.length === 1);
           const task = suggested.snapshot!.tasks[0]!;
           expect(task.text).toBe("Review the API");
@@ -106,6 +111,12 @@ describe("local team hub connector", () => {
             })
             .pipe(Effect.flip);
           expect(conflict.message).toContain("File already claimed");
+          yield* hub.updateRepo("https://github.com/example/new-repo");
+          const edited = yield* nextState(
+            (state) => state.snapshot?.team.repo === "https://github.com/example/new-repo",
+          );
+          expect(edited.snapshot?.selfId).toBe(member.id);
+          expect(edited.snapshot?.notes[0]?.text).toBe("Ready to pair");
           yield* hub.leave;
           expect(yield* nextState((state) => state.url === null)).toEqual({
             url: null,

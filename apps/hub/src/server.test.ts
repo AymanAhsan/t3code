@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vite-plus/test";
+import { TEAM_HUB_PROTOCOL_VERSION } from "@t3tools/contracts/teamHub";
 import { createHubServer } from "./server.ts";
 import { HubStore } from "./store.ts";
 
@@ -54,7 +55,7 @@ describe("team hub server", () => {
     }
   });
 
-  it("lets two members see presence and a published summary over outbound sockets", async () => {
+  it("syncs presence, summaries, and admin repository edits to connected teammates", async () => {
     const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-team-hub-socket-"));
     dirs.push(dir);
     const store = new HubStore(dir);
@@ -67,7 +68,7 @@ describe("team hub server", () => {
     const alice = store.authenticate(admin.credential);
     const bob = store.join(store.createInvite(alice, admin.team.id).token, "Bob");
     const server = await createHubServer(store, { host: "127.0.0.1", port: 0 });
-    const url = `ws://127.0.0.1:${server.port}/ws?version=1`;
+    const url = `ws://127.0.0.1:${server.port}/ws?version=${TEAM_HUB_PROTOCOL_VERSION}`;
     const aliceSocket = new WebSocket(url);
     const bobSocket = new WebSocket(url);
     try {
@@ -84,6 +85,26 @@ describe("team hub server", () => {
       await bobInitial;
       const presence = (await alicePresence) as { snapshot: { members: { online: boolean }[] } };
       expect(presence.snapshot.members.every((member) => member.online)).toBe(true);
+      const updateRepo = (credential: string, repo: unknown) =>
+        fetch(`http://127.0.0.1:${server.port}/api/team/repo`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" },
+          body: JSON.stringify({ repo }),
+        });
+      expect((await updateRepo(bob.credential, "forbidden")).status).toBe(403);
+      for (const invalid of [null, "   ", "x".repeat(257)]) {
+        expect((await updateRepo(admin.credential, invalid)).status).toBe(400);
+      }
+      const aliceRepo = nextMessage(aliceSocket);
+      const bobRepo = nextMessage(bobSocket);
+      expect(
+        (await updateRepo(admin.credential, "https://github.com/example/new-repo")).status,
+      ).toBe(200);
+      for (const update of await Promise.all([aliceRepo, bobRepo])) {
+        expect(update).toMatchObject({
+          snapshot: { team: { repo: "https://github.com/example/new-repo" } },
+        });
+      }
       const bobSummary = nextMessage(bobSocket);
       aliceSocket.send(
         JSON.stringify({
@@ -118,7 +139,7 @@ describe("team hub server", () => {
       "Bob",
     );
     const server = await createHubServer(store, { host: "127.0.0.1", port: 0, heartbeatMs: 50 });
-    const url = `ws://127.0.0.1:${server.port}/ws?version=1`;
+    const url = `ws://127.0.0.1:${server.port}/ws?version=${TEAM_HUB_PROTOCOL_VERSION}`;
     const responsive = new WebSocket(url);
     const silent = new WebSocket(url, { autoPong: false });
     try {
@@ -149,7 +170,9 @@ describe("team hub server", () => {
     const server = await createHubServer(store, { host: "127.0.0.1", port: 0 });
     try {
       const status = await new Promise<number>((resolve) => {
-        const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws?version=0`);
+        const socket = new WebSocket(
+          `ws://127.0.0.1:${server.port}/ws?version=${TEAM_HUB_PROTOCOL_VERSION - 1}`,
+        );
         socket.once("unexpected-response", (_request, response) => {
           resolve(response.statusCode ?? 0);
           response.resume();

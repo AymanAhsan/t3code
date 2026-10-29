@@ -3,6 +3,7 @@ import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
+  formatTeamHubContract,
   incomingTeamHubTasks,
   teamHubActionErrorMessage,
 } from "@t3tools/client-runtime/state/team-hub";
@@ -76,6 +77,11 @@ function ConnectedIncomingTask({ prepared }: { prepared: PreparedConnection }) {
           <p className="mt-1 max-h-28 overflow-y-auto text-sm break-words whitespace-pre-wrap">
             {task.text}
           </p>
+          {task.contract !== null ? (
+            <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+              Contract: {formatTeamHubContract(task.contract)}
+            </p>
+          ) : null}
         </div>
         {error?.taskId === task.id ? (
           <p role="alert" className="mt-2 text-xs text-error">

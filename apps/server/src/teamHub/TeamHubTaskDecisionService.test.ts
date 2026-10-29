@@ -16,7 +16,7 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistryMock.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TeamHubService from "./TeamHubService.ts";
-import { TeamHubTaskDecisionService, layer } from "./TeamHubTaskDecisionService.ts";
+import { TeamHubTaskDecisionService, layer, taskPrompt } from "./TeamHubTaskDecisionService.ts";
 
 const taskId = "00000000-0000-0000-0000-000000000001";
 const authorId = "00000000-0000-0000-0000-000000000002";
@@ -52,8 +52,8 @@ const snapshot: TeamHubSnapshot = {
   },
   selfId,
   members: [
-    { id: authorId, name: "Bob", role: "member", online: true },
-    { id: selfId, name: "Alice", role: "member", online: true },
+    { id: authorId, name: "Bob", role: "member", online: true, domains: [] },
+    { id: selfId, name: "Alice", role: "member", online: true, domains: [] },
   ],
   summaries: [],
   tasks: [
@@ -63,6 +63,7 @@ const snapshot: TeamHubSnapshot = {
       assigneeId: selfId,
       text: "Fix the search bug",
       status: "suggested",
+      contract: null,
       createdAt: 1,
     },
   ],
@@ -216,5 +217,23 @@ describe("team hub suggested task acceptance", () => {
       expect(harness.launched.size).toBe(0);
       expect(harness.hubDecisions).toEqual([]);
     }).pipe(Effect.provide(harness.layer));
+  });
+});
+
+describe("accepted task prompt", () => {
+  it("points the agent at the pinned contract when the task has one", () => {
+    const prompt = taskPrompt(
+      {
+        ...snapshot.tasks[0]!,
+        text: "Build the login API",
+        contract: { branch: "contract/login-api", path: "api/auth.yaml", sha: "b".repeat(40) },
+      },
+      "Alice",
+    );
+    expect(prompt).toContain("Build the login API\n\nSuggested by Alice.");
+    expect(prompt).toContain(
+      `Contract: api/auth.yaml on branch contract/login-api at ${"b".repeat(40)}.`,
+    );
+    expect(prompt).toContain("git fetch origin contract/login-api");
   });
 });

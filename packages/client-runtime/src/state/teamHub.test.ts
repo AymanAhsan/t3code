@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import type { TeamHubSnapshot, TeamHubTask } from "@t3tools/contracts/teamHub";
-import { incomingTeamHubTasks, parseTeamHubLink, withTeamHubOrigin } from "./teamHub.ts";
+import {
+  formatTeamHubContract,
+  incomingTeamHubTasks,
+  parseTeamHubDomains,
+  parseTeamHubLink,
+  withTeamHubOrigin,
+} from "./teamHub.ts";
 
 describe("incomingTeamHubTasks", () => {
   const task = (id: string, overrides: Partial<TeamHubTask> = {}): TeamHubTask => ({
@@ -10,6 +16,7 @@ describe("incomingTeamHubTasks", () => {
     assigneeId: "self",
     text: "Review the change",
     status: "suggested",
+    contract: null,
     createdAt: 10,
     ...overrides,
   });
@@ -73,5 +80,23 @@ describe("withTeamHubOrigin", () => {
       withTeamHubOrigin({ url: "http://localhost:8080", token: "t" }, "ftp://example.test"),
     ).toBeNull();
     expect(withTeamHubOrigin({ url: "http://localhost:8080", token: "t" }, "not a url")).toBeNull();
+  });
+});
+
+describe("team hub domains and contracts", () => {
+  it("splits areas on commas and newlines, dropping blanks and duplicates", () => {
+    expect(parseTeamHubDomains(" apps/api/**, \n\napps/api/**\nserver/ ,")).toEqual([
+      "apps/api/**",
+      "server/",
+    ]);
+  });
+
+  it("labels a contract by path, short sha, and branch", () => {
+    const contract = {
+      branch: "contract/login",
+      path: "api/auth.yaml",
+      sha: "1a2b3c4".padEnd(40, "0"),
+    };
+    expect(formatTeamHubContract(contract)).toBe("api/auth.yaml @ 1a2b3c4 (contract/login)");
   });
 });

@@ -179,6 +179,13 @@ export async function createHubServer(
         const member = authenticate(store, request);
         return json(response, 200, store.listInvites(member));
       }
+      if (request.method === "POST" && url.pathname === "/api/team/repo") {
+        const member = authenticate(store, request);
+        const input = await body(request);
+        store.updateRepo(member, string(input.repo, "repository"));
+        broadcast(member.team_id);
+        return json(response, 200, { ok: true });
+      }
       if (request.method === "POST" && url.pathname === "/api/members/remove") {
         const member = authenticate(store, request);
         const input = await body(request);

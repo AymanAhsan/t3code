@@ -3,6 +3,7 @@ import type {
   TeamHubClientMessage,
   TeamHubJoinInput,
   TeamHubBootstrapInput,
+  TeamHubContractRef,
   TeamHubNetworkInput,
   TeamHubSnapshot,
 } from "@t3tools/contracts/teamHub";
@@ -38,6 +39,20 @@ export function incomingTeamHubTasks(snapshot: TeamHubSnapshot | null) {
   ).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
+/** Turns the comma- or newline-separated "Your areas" text into domain globs. */
+export function parseTeamHubDomains(text: string): string[] {
+  const domains = text
+    .split(/[\n,]/)
+    .map((domain) => domain.trim())
+    .filter((domain) => domain.length > 0 && domain.length <= 256);
+  return [...new Set(domains)].slice(0, 20);
+}
+
+/** Short label for a task's contract, such as `api/auth.yaml @ 1a2b3c4 (contract/login)`. */
+export function formatTeamHubContract(contract: TeamHubContractRef): string {
+  return `${contract.path} @ ${contract.sha.slice(0, 7)} (${contract.branch})`;
+}
+
 export type TeamHubAction =
   | { readonly type: "join"; readonly input: TeamHubJoinInput }
   | { readonly type: "bootstrap"; readonly input: TeamHubBootstrapInput }
@@ -48,6 +63,7 @@ export type TeamHubAction =
   | { readonly type: "publish"; readonly input: TeamHubClientMessage }
   | { readonly type: "invite" }
   | { readonly type: "revokeInvite"; readonly inviteId: string }
+  | { readonly type: "updateRepo"; readonly repo: string }
   | { readonly type: "removeMember"; readonly memberId: string }
   | {
       readonly type: "decideTask";
@@ -216,6 +232,13 @@ export const runTeamHubAction = Effect.fn("clientRuntime.teamHub.action")(functi
         url: (base) => makeEnvironmentHttpApiUrlBuilder(base).teamHub.revokeInvite(),
         request: ({ client, headers }) =>
           client.revokeInvite({ headers, payload: { inviteId: action.inviteId } }),
+      });
+    case "updateRepo":
+      return yield* executeAuthenticatedEnvironmentHttpRequest({
+        ...common,
+        url: (base) => makeEnvironmentHttpApiUrlBuilder(base).teamHub.updateRepo(),
+        request: ({ client, headers }) =>
+          client.updateRepo({ headers, payload: { repo: action.repo } }),
       });
     case "removeMember":
       return yield* executeAuthenticatedEnvironmentHttpRequest({

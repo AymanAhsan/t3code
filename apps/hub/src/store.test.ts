@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - Tests use isolated temporary SQLite databases.
 import * as NodeFS from "node:fs";
+import * as NodeSqlite from "node:sqlite";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -31,6 +32,31 @@ describe("team hub store", () => {
     const configured = new HubStore(dir);
     expect(configured.setupToken).toBeNull();
     configured.close();
+  });
+
+  it("persists admin repository edits without changing membership or coordination history", () => {
+    const { dir, store } = open();
+    const admin = store.bootstrap(store.setupToken!, "Engineering", "old-repo", "Alice");
+    const alice = store.authenticate(admin.credential);
+    const bob = store.join(store.createInvite(alice, admin.team.id).token, "Bob");
+    const member = store.authenticate(bob.credential);
+    store.publish(alice, { type: "post_note", text: "Keep this note" });
+    expect(() => store.updateRepo(member, "unauthorized-repo")).toThrow("Admin required");
+    for (const invalid of ["", "   ", "x".repeat(257)]) {
+      expect(() => store.updateRepo(alice, invalid)).toThrow("Invalid repository");
+    }
+    expect(store.snapshot(alice, new Set()).team.repo).toBe("old-repo");
+    store.updateRepo(alice, " https://github.com/example/new-repo ");
+    store.close();
+    const reopened = new HubStore(dir);
+    try {
+      const snapshot = reopened.snapshot(reopened.authenticate(bob.credential), new Set());
+      expect(snapshot.team).toEqual({ ...admin.team, repo: "https://github.com/example/new-repo" });
+      expect(snapshot.members).toHaveLength(2);
+      expect(snapshot.notes[0]?.text).toBe("Keep this note");
+    } finally {
+      reopened.close();
+    }
   });
 
   it("uses expiring single-use invites and revocable credentials", () => {
@@ -73,6 +99,7 @@ describe("team hub store", () => {
       type: "post_task",
       assigneeId: bob.memberId,
       text: "Update the client",
+      contract: null,
     });
     const before = store.snapshot(bobMember, new Set()).tasks[0];
     expect(before?.status).toBe("suggested");
@@ -80,5 +107,55 @@ describe("team hub store", () => {
     store.decideTask(bobMember, before!.id, "accepted");
     expect(store.snapshot(bobMember, new Set()).tasks[0]?.status).toBe("accepted");
     store.close();
+  });
+  it("routes tasks with a pinned contract and keeps each member's domains their own", () => {
+    const { dir, store } = open();
+    const admin = store.bootstrap(store.setupToken!, "Engineering", "repo", "Alice");
+    const alice = store.authenticate(admin.credential);
+    const bob = store.join(store.createInvite(alice, admin.team.id).token, "Bob");
+    const bobMember = store.authenticate(bob.credential);
+    store.publish(bobMember, { type: "set_domains", domains: ["apps/api/**", "apps/api/**"] });
+    const contract = {
+      branch: "contract/login-api",
+      path: "api/auth.openapi.yaml",
+      sha: "a".repeat(40),
+    };
+    store.publish(alice, {
+      type: "post_task",
+      assigneeId: bob.memberId,
+      text: "Build the login API",
+      contract,
+    });
+    store.close();
+    const reopened = new HubStore(dir);
+    try {
+      const snapshot = reopened.snapshot(reopened.authenticate(admin.credential), new Set());
+      expect(snapshot.members.find((m) => m.id === bob.memberId)?.domains).toEqual(["apps/api/**"]);
+      expect(snapshot.members.find((m) => m.id === alice.id)?.domains).toEqual([]);
+      expect(snapshot.tasks[0]?.contract).toEqual(contract);
+    } finally {
+      reopened.close();
+    }
+  });
+
+  it("adds new columns to a hub database created before domains and contracts", () => {
+    const { dir, store } = open();
+    const admin = store.bootstrap(store.setupToken!, "Engineering", "repo", "Alice");
+    const alice = store.authenticate(admin.credential);
+    store.publish(alice, { type: "post_task", assigneeId: null, text: "Old task", contract: null });
+    store.close();
+    const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "hub.sqlite"));
+    db.exec(
+      "ALTER TABLE members DROP COLUMN domains_json; ALTER TABLE tasks DROP COLUMN contract_json;",
+    );
+    db.close();
+    const migrated = new HubStore(dir);
+    try {
+      const snapshot = migrated.snapshot(migrated.authenticate(admin.credential), new Set());
+      expect(snapshot.members[0]?.domains).toEqual([]);
+      expect(snapshot.tasks[0]).toMatchObject({ text: "Old task", contract: null });
+    } finally {
+      migrated.close();
+    }
   });
 });

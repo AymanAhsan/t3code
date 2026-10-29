@@ -68,6 +68,7 @@ import {
   TeamHubNetworkState,
   TeamHubReachability,
   TeamHubRemoveMemberInput,
+  TeamHubUpdateRepoInput,
   TeamHubRevokeInviteInput,
   TeamHubState,
   TeamHubTaskDecisionInput,
@@ -670,6 +671,14 @@ class EnvironmentTeamHubHttpApi extends HttpApiGroup.make("teamHub")
     HttpApiEndpoint.post("revokeInvite", "/api/team-hub/revoke-invite", {
       headers: OptionalBearerHeaders,
       payload: TeamHubRevokeInviteInput,
+      success: TeamHubState,
+      error: EnvironmentTeamHubErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("updateRepo", "/api/team-hub/update-repo", {
+      headers: OptionalBearerHeaders,
+      payload: TeamHubUpdateRepoInput,
       success: TeamHubState,
       error: EnvironmentTeamHubErrors,
     }).middleware(EnvironmentAuthenticatedAuth),

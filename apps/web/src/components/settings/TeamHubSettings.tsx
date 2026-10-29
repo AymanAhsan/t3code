@@ -1,5 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
+  formatTeamHubContract,
+  parseTeamHubDomains,
   parseTeamHubLink,
   readTeamHubInvites,
   incomingTeamHubTasks,
@@ -31,6 +33,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Radio, RadioGroup } from "../ui/radio-group";
+import { Textarea } from "../ui/textarea";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { HubAddressRow, HubConnectionCheck, HubLinkCheck, HubSharing } from "./TeamHubReach";
 
@@ -212,6 +215,10 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
   const [settingUp, setSettingUp] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [repo, setRepo] = useState("");
+  const [editingRepo, setEditingRepo] = useState(false);
+  const [repoDraft, setRepoDraft] = useState("");
+  const [editingAreas, setEditingAreas] = useState(false);
+  const [areasDraft, setAreasDraft] = useState("");
   const [invite, setInvite] = useState<TeamHubInvite | null>(null);
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
@@ -230,6 +237,8 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
     const outcome = await command({ prepared, action });
     setBusy(false);
     if (AsyncResult.isSuccess(outcome)) {
+      if (action.type === "updateRepo") setEditingRepo(false);
+      if (action.type === "publish" && action.input.type === "set_domains") setEditingAreas(false);
       if (action.type === "invite") setInvite(outcome.value as TeamHubInvite);
       if (
         action.type === "decideTask" &&
@@ -437,7 +446,6 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
     <>
       <SettingsRow
         title={snapshot?.team.name ?? state.url}
-        description={snapshot ? <span className="font-mono">{snapshot.team.repo}</span> : undefined}
         status={
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -464,6 +472,69 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
       />
       {snapshot && (
         <>
+          <SettingsRow
+            title="GitHub repository"
+            description="The repository whose checkpoints are shared with this team."
+            control={
+              self?.role === "admin" && !editingRepo ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || state.status !== "connected"}
+                  onClick={() => {
+                    setRepoDraft(snapshot.team.repo);
+                    setEditingRepo(true);
+                  }}
+                >
+                  Edit repository
+                </Button>
+              ) : undefined
+            }
+          >
+            {editingRepo && self?.role === "admin" ? (
+              <form
+                className="space-y-2 pt-3 pb-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (repoDraft.trim()) void act({ type: "updateRepo", repo: repoDraft.trim() });
+                }}
+              >
+                <Input
+                  size="sm"
+                  aria-label="GitHub repository"
+                  placeholder="Git remote URL"
+                  value={repoDraft}
+                  maxLength={256}
+                  disabled={busy}
+                  onChange={(event) => setRepoDraft(event.target.value)}
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={busy || state.status !== "connected" || !repoDraft.trim()}
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      setEditingRepo(false);
+                      setError(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <p className="py-2 font-mono text-xs break-all">{snapshot.team.repo}</p>
+            )}
+          </SettingsRow>
           <SettingsRow title="Members">
             <HubList>
               {snapshot.members.map((member) => (
@@ -496,9 +567,75 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
                       <span className="text-xs text-muted-foreground">You</span>
                     ) : null}
                   </p>
+                  {member.domains.length > 0 ? (
+                    <p className="truncate font-mono text-xs text-muted-foreground">
+                      {member.domains.join(", ")}
+                    </p>
+                  ) : null}
                 </HubListItem>
               ))}
             </HubList>
+          </SettingsRow>
+          <SettingsRow
+            title="Your areas"
+            description="Repository paths you own, such as apps/api/**. Teammates' agents send tasks for these paths to you."
+            control={
+              !editingAreas ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || state.status !== "connected"}
+                  onClick={() => {
+                    setAreasDraft(self?.domains.join("\n") ?? "");
+                    setEditingAreas(true);
+                  }}
+                >
+                  Edit areas
+                </Button>
+              ) : undefined
+            }
+          >
+            {editingAreas ? (
+              <form
+                className="space-y-2 pt-3 pb-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void act({
+                    type: "publish",
+                    input: { type: "set_domains", domains: parseTeamHubDomains(areasDraft) },
+                  });
+                }}
+              >
+                <Textarea
+                  size="sm"
+                  aria-label="Your areas"
+                  placeholder={"apps/api/**\npackages/contracts/**"}
+                  value={areasDraft}
+                  disabled={busy}
+                  onChange={(event) => setAreasDraft(event.target.value)}
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <Button type="submit" size="sm" disabled={busy || state.status !== "connected"}>
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      setEditingAreas(false);
+                      setError(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            ) : self && self.domains.length > 0 ? (
+              <p className="py-2 font-mono text-xs break-all">{self.domains.join(", ")}</p>
+            ) : null}
           </SettingsRow>
           {self?.role === "admin" && (
             <AdminInvites
@@ -552,6 +689,11 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
                     }
                   >
                     <p className="text-sm">{task.text}</p>
+                    {task.contract !== null ? (
+                      <p className="truncate font-mono text-xs text-muted-foreground">
+                        Contract: {formatTeamHubContract(task.contract)}
+                      </p>
+                    ) : null}
                   </HubListItem>
                 ))}
               </HubList>

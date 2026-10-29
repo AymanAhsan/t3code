@@ -100,6 +100,16 @@ export const teamHubHttpApiLayer = HttpApiBuilder.group(
         }),
       )
       .handle(
+        "updateRepo",
+        Effect.fn("teamHub.updateRepo")(function* ({ payload }) {
+          yield* requireEnvironmentScope(AuthAccessWriteScope);
+          yield* hub
+            .updateRepo(payload.repo)
+            .pipe(Effect.catch(() => failEnvironmentInvalidRequest("invalid_command")));
+          return yield* state;
+        }),
+      )
+      .handle(
         "removeMember",
         Effect.fn("teamHub.removeMember")(function* ({ payload }) {
           yield* requireEnvironmentScope(AuthAccessWriteScope);
