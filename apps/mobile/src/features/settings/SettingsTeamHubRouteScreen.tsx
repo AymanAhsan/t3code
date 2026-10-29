@@ -23,6 +23,7 @@ import { AppText as Text } from "../../components/AppText";
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { usePreparedConnection } from "../../state/session";
+import { environmentShell } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
@@ -31,8 +32,14 @@ const teamHubStateAtom = createTeamHubStateAtomFamily(connectionAtomRuntime);
 
 const actionCommand = createRuntimeCommand(connectionAtomRuntime, {
   label: "team hub action",
-  execute: ({ prepared, action }: { prepared: PreparedConnection; action: TeamHubAction }) =>
-    runTeamHubAction(prepared, action),
+  execute: (
+    { prepared, action }: { prepared: PreparedConnection; action: TeamHubAction },
+    registry,
+  ) =>
+    runTeamHubAction(prepared, action, {
+      registry,
+      shell: environmentShell.stateValueAtom(prepared.environmentId),
+    }),
 });
 
 function Action({
