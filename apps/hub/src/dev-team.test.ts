@@ -2,13 +2,93 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeURL from "node:url";
 import { afterEach, expect, it } from "vite-plus/test";
-import { prepareTeamSessions } from "./dev-team.ts";
+import { prepareTeamSessions, resolveTeamProject } from "./dev-team.ts";
 import { HubStore } from "./store.ts";
 
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) NodeFS.rmSync(root, { recursive: true, force: true });
+});
+
+function createRepository(root: string, directory: string, origin: string) {
+  const project = NodePath.join(root, directory);
+  NodeFS.mkdirSync(project, { recursive: true });
+  NodeChildProcess.execFileSync("git", ["init", "--quiet", project]);
+  NodeChildProcess.execFileSync("git", ["remote", "add", "origin", origin], { cwd: project });
+  return project;
+}
+
+it("keeps target repositories isolated and resumes their saved memberships", () => {
+  const checkout = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-dev-team-"));
+  roots.push(checkout);
+  const first = createRepository(checkout, "first/project", "https://example.com/first");
+  const second = createRepository(checkout, "second/project", "https://example.com/second");
+  const credentials: string[] = [];
+  const selections = [first, second].map((project) => resolveTeamProject(checkout, project));
+  expect(selections[0]!.root).not.toBe(selections[1]!.root);
+  for (const selection of selections) {
+    const store = new HubStore(NodePath.join(selection.root, "hub"));
+    try {
+      const sessions = prepareTeamSessions(
+        store,
+        selection.root,
+        "http://localhost:8080/",
+        selection.repo,
+      );
+      credentials.push(NodeFS.readFileSync(sessions[0]!.membershipPath, "utf8"));
+      expect(store.snapshot(store.authenticate(credentials.at(-1)!), new Set()).team.repo).toBe(
+        selection.repo,
+      );
+    } finally {
+      store.close();
+    }
+  }
+  const resumed = resolveTeamProject(checkout, NodePath.join(first, "."));
+  expect(resumed.root).toBe(selections[0]!.root);
+  const store = new HubStore(NodePath.join(resumed.root, "hub"));
+  try {
+    const sessions = prepareTeamSessions(
+      store,
+      resumed.root,
+      "http://localhost:8080/",
+      resumed.repo,
+    );
+    expect(NodeFS.readFileSync(sessions[0]!.membershipPath, "utf8")).toBe(credentials[0]);
+    expect(() => store.authenticate(credentials[1]!)).toThrow();
+  } finally {
+    store.close();
+  }
+  NodeChildProcess.execFileSync(
+    "git",
+    ["remote", "set-url", "origin", "https://example.com/changed"],
+    { cwd: first },
+  );
+  expect(resolveTeamProject(checkout, first).root).not.toBe(resumed.root);
+});
+
+it("preserves the default state location and previews a relative target without creating state", () => {
+  const checkout = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-dev-team-"));
+  roots.push(checkout);
+  createRepository(checkout, ".", "https://example.com/app");
+  const target = createRepository(checkout, "target project", "https://example.com/target");
+  expect(resolveTeamProject(checkout).root).toBe(NodePath.join(checkout, ".t3", "team-demo"));
+  const output = NodeChildProcess.execFileSync(
+    process.execPath,
+    [
+      NodeURL.fileURLToPath(new URL("./dev-team.ts", import.meta.url)),
+      "--project-dir",
+      "target project",
+      "--dry-run",
+    ],
+    { cwd: checkout, encoding: "utf8" },
+  );
+  expect(output).toContain(`Project: ${NodeFS.realpathSync(target)}`);
+  expect(output).toContain("Repository: https://example.com/target");
+  expect(output).toContain(`${NodePath.sep}team-demo${NodePath.sep}projects${NodePath.sep}`);
+  expect(NodeFS.existsSync(NodePath.join(checkout, ".t3"))).toBe(false);
 });
 
 it("enrolls Alice and Bob with distinct persistent credentials and preserves their settings and tasks", () => {

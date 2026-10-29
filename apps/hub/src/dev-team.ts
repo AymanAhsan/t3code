@@ -7,11 +7,33 @@ import * as NodeURL from "node:url";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeReadline from "node:readline";
 import * as NodeUtil from "node:util";
+import * as NodeCrypto from "node:crypto";
 import { createHubServer } from "./server.ts";
 import { HubStore } from "./store.ts";
 import { loadRepoEnv } from "../../../scripts/lib/public-config.ts";
 
 const repoRoot = NodeURL.fileURLToPath(new URL("../../../", import.meta.url));
+
+/** Select the workspace independently of the checkout that runs the app. */
+export function resolveTeamProject(checkoutRoot: string, projectDir?: string) {
+  const projectRoot = NodeFS.realpathSync(projectDir ?? checkoutRoot);
+  const repo = NodeChildProcess.execFileSync("git", ["remote", "get-url", "origin"], {
+    cwd: projectRoot,
+    encoding: "utf8",
+  }).trim();
+  const demoRoot = NodePath.join(checkoutRoot, ".t3", "team-demo");
+  // Keep existing default sessions; explicit targets get independent persistent state.
+  const identity = JSON.stringify([projectRoot, repo]);
+  const root =
+    projectDir === undefined
+      ? demoRoot
+      : NodePath.join(
+          demoRoot,
+          "projects",
+          NodeCrypto.createHash("sha256").update(identity).digest("hex").slice(0, 16),
+        );
+  return { projectRoot, repo, root };
+}
 
 /** Enroll once and preserve each session's credentials and settings across restarts. */
 export function prepareTeamSessions(store: HubStore, root: string, hubUrl: string, repo: string) {
@@ -73,16 +95,19 @@ async function main() {
   const { values } = NodeUtil.parseArgs({
     options: {
       "hub-port": { type: "string", default: "8080" },
+      "project-dir": { type: "string" },
       help: { type: "boolean", short: "h" },
       "dry-run": { type: "boolean" },
     },
   });
   if (values.help) {
-    console.log(`Usage: vp run dev:team [--hub-port 8080] [--dry-run]
+    console.log(`Usage: vp run dev:team [--project-dir <path>] [--hub-port 8080] [--dry-run]
 
 Starts the hub and Alice/Bob web + server sessions, already joined to a team.
-The current checkout is added as a project in both sessions.
-State persists in .t3/team-demo; Ctrl+C stops everything started here.
+The selected directory (default: this checkout) is added as a project in both sessions.
+The app always runs from this checkout; no build is needed for another project.
+State persists in .t3/team-demo, with separate state per explicit target directory/repository.
+Ctrl+C stops everything started here.
 Open the labeled pairing URLs printed at startup to access each session.
 No browser is opened automatically. Use the Team hub settings to test Tailscale sharing.`);
     return;
@@ -91,15 +116,11 @@ No browser is opened automatically. Use the Team hub settings to test Tailscale 
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("--hub-port must be between 1 and 65535.");
   }
-  const root = NodePath.join(repoRoot, ".t3", "team-demo");
+  const { projectRoot, repo, root } = resolveTeamProject(repoRoot, values["project-dir"]);
   const hubUrl = `http://127.0.0.1:${port}/`;
-  const repo = NodeChildProcess.execFileSync("git", ["remote", "get-url", "origin"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  }).trim();
   if (values["dry-run"]) {
     console.log(
-      `Hub: ${hubUrl}\nAlice + Bob: separate web/server instances\nState: ${root}\nProject: ${repoRoot}\nRepository: ${repo}`,
+      `Hub: ${hubUrl}\nAlice + Bob: separate web/server instances\nState: ${root}\nProject: ${projectRoot}\nRepository: ${repo}`,
     );
     return;
   }
@@ -167,7 +188,7 @@ No browser is opened automatically. Use the Team hub settings to test Tailscale 
     // Bind before changing session state, so an occupied port fails without enrolling anyone.
     hub = await createHubServer(store, { host: "127.0.0.1", port });
     const sessions = prepareTeamSessions(store, root, hubUrl, repo);
-    console.log(`[hub] ${hubUrl}\n[team] State: ${root}\n[team] Project: ${repoRoot}`);
+    console.log(`[hub] ${hubUrl}\n[team] State: ${root}\n[team] Project: ${projectRoot}`);
     for (const [index, session] of sessions.entries()) {
       if (stopping) break;
       const env: NodeJS.ProcessEnv = {
@@ -188,12 +209,12 @@ No browser is opened automatically. Use the Team hub settings to test Tailscale 
       env.T3CODE_PORT_OFFSET = String(Number(ports[2]) - 5733);
       const webUrl = `http://localhost:${ports[2]}`;
       // The filtered package runner changes cwd to apps/server. Start the backend
-      // directly so the initial project and thread belong to the checkout root.
+      // directly with the selected workspace as the initial project and thread.
       const commands = [
         [
           "--watch",
           NodePath.join(repoRoot, "apps", "server", "src", "bin.ts"),
-          repoRoot,
+          projectRoot,
           "--mode",
           "web",
           "--base-dir",

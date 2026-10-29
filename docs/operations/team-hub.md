@@ -53,8 +53,64 @@ The hub requires protocol version 2 for WebSocket connections and responds with 
 
 ## Local development with Alice and Bob
 
-Run `vp run dev:team` from the checkout to start a local hub and two web/server sessions. Alice is the team admin and Bob is a member; both join automatically and get a project and initial thread for this checkout. Open each session's labeled pairing URL printed in the terminal. The launcher does not open browsers.
+Run these commands from the T3 Code checkout after [installing its dependencies](./development.md#first-checkout). Node 24 and Git must be available. The selected project must have a Git `origin` remote, which identifies the team's repository. Docker is not needed for this local launcher.
 
-State persists under `.t3/team-demo`, with separate Alice and Bob settings, credentials, and databases. Both projects use the same checkout, so agent edits affect the same files. Press Ctrl+C to stop the hub and both sessions. Use `--hub-port 18080` if port 8080 is occupied, or `--dry-run` to preview the setup without starting it. Session ports move automatically when occupied.
+Start a local hub and two web/server sessions using this checkout as the project:
 
-The launcher binds locally and does not change Tailscale configuration. If it was forcibly killed, confirm its processes have stopped and remove `.t3/team-demo/launcher.lock` before restarting.
+```sh
+vp run dev:team
+```
+
+Alice is the team admin and Bob is a member; both join automatically and get a project and initial thread. Open each session's labeled pairing URL printed in the terminal. The launcher does not open browsers. Authenticate any provider you want to test before starting agent work.
+
+### Test another repository without building the app
+
+Pass the directory where Alice and Bob should work. The app code still runs from the T3 Code checkout, so you can test local app changes against a different project without compiling or installing T3 Code.
+
+```sh
+vp run dev:team --project-dir ../notes-api
+```
+
+Absolute paths work too. Quote paths containing spaces. For example, in PowerShell:
+
+```powershell
+vp run dev:team --project-dir "C:\Users\Your Name\notes-api"
+```
+
+Relative paths resolve from the shell's current directory. Both sessions share the selected project files, so agent edits affect the same files.
+
+### Preview, ports, and stopping
+
+Preview the selected project, Git origin, hub address, and state directory without starting processes or creating demo state:
+
+```sh
+vp run dev:team --project-dir ../notes-api --dry-run
+```
+
+If port 8080 is occupied, choose another hub port:
+
+```sh
+vp run dev:team --project-dir ../notes-api --hub-port 18080
+```
+
+Alice and Bob's server and web ports move automatically when occupied. Read their actual addresses from the startup output. Press Ctrl+C in the launcher terminal to stop the hub and both sessions. Run `vp run dev:team --help` for the available options.
+
+### Saved sessions and restart errors
+
+State persists under `.t3/team-demo`, with separate Alice and Bob settings, credentials, and databases. Explicit `--project-dir` targets use separate state under `.t3/team-demo/projects`, keyed by directory and Git origin; returning to the same target resumes its sessions. Omitting the option keeps using the original demo state. Moving the target directory or changing its Git origin selects fresh state.
+
+If startup reports `Saved Alice membership belongs to a different team/repository.`, the saved team's repository differs from the selected project's Git origin. Restart with an explicit `--project-dir` for the intended repository to use its separate state. This also works with `--project-dir .` when testing the T3 Code checkout itself. Existing demo state is preserved.
+
+The launcher binds locally and does not change Tailscale configuration. If it was forcibly killed, confirm its processes have stopped and remove only `launcher.lock` from the state directory printed in the error before restarting.
+
+### Check launcher changes
+
+Run the focused tests, lint, and hub typecheck from the T3 Code checkout:
+
+```sh
+vp test run apps/hub/src/dev-team.test.ts
+vp lint apps/hub/src/dev-team.ts apps/hub/src/dev-team.test.ts
+vp run --filter @t3tools/hub typecheck
+```
+
+The tests cover repository isolation, saved membership reuse, and dry-run selection. Use a dry run against your target repository to check its actual path and origin before starting the sessions.

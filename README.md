@@ -127,6 +127,10 @@ Checkout their getting started guide for more information: https://viteplus.dev/
 vp i
 ```
 
+See the [development guide](./docs/operations/development.md) for running from source and focused checks,
+or [testing with Alice and Bob](./docs/operations/team-hub.md#local-development-with-alice-and-bob)
+to try team features against this checkout or another repository.
+
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
 
 Have a feature request? Start an [Ideas discussion](https://github.com/pingdotgg/t3code/discussions/categories/ideas).
