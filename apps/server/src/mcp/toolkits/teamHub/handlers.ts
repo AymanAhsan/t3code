@@ -54,7 +54,9 @@ export const TeamHubHandlersLive = TeamHubToolkit.toLayer({
         tasks: current.tasks.filter(
           (task) =>
             task.status === "suggested" &&
-            (task.assigneeId === null || task.assigneeId === current.selfId),
+            (task.assigneeId === null ||
+              task.assigneeId === current.selfId ||
+              (task.authorId === current.selfId && task.contractAwaiting === "author")),
         ),
       };
     }),
@@ -91,6 +93,22 @@ export const TeamHubHandlersLive = TeamHubToolkit.toLayer({
           ),
         );
       return { posted: true, assigneeId: posted.assigneeId };
+    }),
+  team_review_contract: ({ taskId, decision, sha }) =>
+    Effect.gen(function* () {
+      const { caller } = yield* readMutationCaller();
+      yield* snapshot(caller.projectId);
+      const delegation = yield* TeamHubDelegationService.TeamHubDelegationService;
+      yield* delegation.reviewContract({ projectId: caller.projectId, taskId, decision, sha }).pipe(
+        Effect.mapError(
+          (error) =>
+            new OrchestratorMcpFailure({
+              code: error.reason === "hub_failed" ? "orchestration_error" : "invalid_request",
+              message: error.message,
+            }),
+        ),
+      );
+      return { sent: true };
     }),
   team_set_domains: ({ domains }) =>
     Effect.gen(function* () {

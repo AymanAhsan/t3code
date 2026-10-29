@@ -17,6 +17,7 @@ describe("incomingTeamHubTasks", () => {
     text: "Review the change",
     status: "suggested",
     contract: null,
+    contractAwaiting: null,
     createdAt: 10,
     ...overrides,
   });
@@ -49,6 +50,30 @@ describe("incomingTeamHubTasks", () => {
     const state = snapshot([task("new", { createdAt: 20 }), task("old")]);
     expect(incomingTeamHubTasks(state).map((task) => task.id)).toEqual(["old", "new"]);
     expect(state.tasks.map((task) => task.id)).toEqual(["new", "old"]);
+  });
+
+  it("puts a revised contract in front of the author and out of the assignee's way", () => {
+    const contract = { branch: "contract/x", path: "api/x.yaml", sha: "a".repeat(40) };
+    const state = snapshot([
+      task("assigned-waiting", { contract, contractAwaiting: "author" }),
+      task("authored-agree", {
+        authorId: "self",
+        assigneeId: "bob",
+        contract,
+        contractAwaiting: "author",
+      }),
+      task("authored-pending", {
+        authorId: "self",
+        assigneeId: "bob",
+        contract,
+        contractAwaiting: "assignee",
+      }),
+    ]);
+    expect(incomingTeamHubTasks(state).map((task) => task.id)).toEqual(["authored-agree"]);
+    expect(incomingTeamHubTasks(state, { includeWaiting: true }).map((task) => task.id)).toEqual([
+      "assigned-waiting",
+      "authored-agree",
+    ]);
   });
 
   it("has no incoming tasks before joining a team", () => {

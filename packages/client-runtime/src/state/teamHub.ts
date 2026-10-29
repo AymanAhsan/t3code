@@ -6,6 +6,7 @@ import type {
   TeamHubContractRef,
   TeamHubNetworkInput,
   TeamHubSnapshot,
+  TeamHubTask,
 } from "@t3tools/contracts/teamHub";
 import * as Effect from "effect/Effect";
 import { WS_METHODS, type ThreadId } from "@t3tools/contracts";
@@ -31,14 +32,31 @@ export function createTeamHubStateAtomFamily<R, E>(
   });
 }
 
-/** Tasks this environment's member can accept, oldest first. */
-export function incomingTeamHubTasks(snapshot: TeamHubSnapshot | null) {
+/**
+ * What `selfId` can do with a suggested task right now: `decide` (accept or dismiss),
+ * `agree` (the author agrees to the assignee's revised contract), or `waiting` (the assignee
+ * revised the contract and the author has not agreed yet). `null` when it is not theirs.
+ */
+export function teamHubTaskTurn(
+  task: TeamHubTask,
+  selfId: string,
+): "decide" | "agree" | "waiting" | null {
+  if (task.status !== "suggested") return null;
+  if (task.authorId === selfId && task.contractAwaiting === "author") return "agree";
+  if (task.assigneeId !== null && task.assigneeId !== selfId) return null;
+  return task.contractAwaiting === "author" ? "waiting" : "decide";
+}
+
+/** Suggested tasks waiting on this member, oldest first. */
+export function incomingTeamHubTasks(
+  snapshot: TeamHubSnapshot | null,
+  options: { readonly includeWaiting?: boolean } = {},
+) {
   return (
-    snapshot?.tasks.filter(
-      (task) =>
-        task.status === "suggested" &&
-        (task.assigneeId === null || task.assigneeId === snapshot.selfId),
-    ) ?? []
+    snapshot?.tasks.filter((task) => {
+      const turn = teamHubTaskTurn(task, snapshot.selfId);
+      return turn === "decide" || turn === "agree" || (options.includeWaiting && turn !== null);
+    }) ?? []
   ).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 

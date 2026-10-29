@@ -6,6 +6,7 @@ import {
   formatTeamHubContract,
   incomingTeamHubTasks,
   teamHubActionErrorMessage,
+  teamHubTaskTurn,
 } from "@t3tools/client-runtime/state/team-hub";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -35,14 +36,23 @@ function ConnectedIncomingTask({ prepared }: { prepared: PreparedConnection }) {
   const connected = state?.status === "connected";
 
   if (!task) return null;
-  const author = state?.snapshot?.members.find((member) => member.id === task.authorId);
+  const memberName = (memberId: string | null) =>
+    state?.snapshot?.members.find((member) => member.id === memberId)?.name ?? "Teammate";
+  // The author only sees a task here when the assignee revised its contract.
+  const agreeing = teamHubTaskTurn(task, state?.snapshot?.selfId ?? "") === "agree";
 
-  const decide = async (decision: "accepted" | "dismissed") => {
+  const decide = async (decision: "accepted" | "dismissed" | "agreed") => {
     setBusy(true);
     setError(null);
     const outcome = await command({
       prepared,
-      action: { type: "decideTask", taskId: task.id, decision },
+      action:
+        decision === "agreed"
+          ? {
+              type: "publish",
+              input: { type: "agree_contract", taskId: task.id, sha: task.contract?.sha ?? "" },
+            }
+          : { type: "decideTask", taskId: task.id, decision },
     });
     setBusy(false);
     if (!AsyncResult.isSuccess(outcome)) {
@@ -71,7 +81,9 @@ function ConnectedIncomingTask({ prepared }: { prepared: PreparedConnection }) {
       >
         <div aria-live="polite" aria-atomic="true">
           <p className="text-xs text-muted-foreground">
-            Task from {author?.name ?? "Teammate"}
+            {agreeing
+              ? `${memberName(task.assigneeId)} revised the contract`
+              : `Task from ${memberName(task.authorId)}`}
             {tasks.length > 1 ? ` · ${tasks.length} pending` : ""}
           </p>
           <p className="mt-1 max-h-28 overflow-y-auto text-sm break-words whitespace-pre-wrap">
@@ -80,6 +92,11 @@ function ConnectedIncomingTask({ prepared }: { prepared: PreparedConnection }) {
           {task.contract !== null ? (
             <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
               Contract: {formatTeamHubContract(task.contract)}
+            </p>
+          ) : null}
+          {agreeing ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Agree so work can start, or ask your agent to revise it.
             </p>
           ) : null}
         </div>
@@ -93,19 +110,35 @@ function ConnectedIncomingTask({ prepared }: { prepared: PreparedConnection }) {
             Reconnect to the team hub to respond.
           </p>
         ) : null}
-        <div className="mt-3 flex gap-2">
-          <Button size="xs" disabled={busy || !connected} onClick={() => void decide("accepted")}>
-            Accept
-          </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={busy || !connected}
-            onClick={() => void decide("dismissed")}
-          >
-            Dismiss
-          </Button>
-        </div>
+        {agreeing ? (
+          <div className="mt-3 flex gap-2">
+            <Button size="xs" disabled={busy || !connected} onClick={() => void decide("agreed")}>
+              Agree
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setDecided((ids) => [...ids, task.id])}
+            >
+              Not now
+            </Button>
+          </div>
+        ) : (
+          <div className="mt-3 flex gap-2">
+            <Button size="xs" disabled={busy || !connected} onClick={() => void decide("accepted")}>
+              Accept
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy || !connected}
+              onClick={() => void decide("dismissed")}
+            >
+              Dismiss
+            </Button>
+          </div>
+        )}
       </section>
     </div>
   );

@@ -3,7 +3,7 @@ import { ThreadId } from "./baseSchemas.ts";
 
 import { PortSchema } from "./baseSchemas.ts";
 
-export const TEAM_HUB_PROTOCOL_VERSION = 2;
+export const TEAM_HUB_PROTOCOL_VERSION = 3;
 
 const Text = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/));
@@ -30,13 +30,19 @@ export const TeamHubSummary = Schema.Struct({
 });
 export type TeamHubSummary = typeof TeamHubSummary.Type;
 
+const Sha = Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/));
+
 /** Points at the contract file both sides build against, pinned to a pushed commit. */
 export const TeamHubContractRef = Schema.Struct({
   branch: Text,
   path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
-  sha: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/)),
+  sha: Sha,
 });
 export type TeamHubContractRef = typeof TeamHubContractRef.Type;
+
+/** The two sides of a contract task: the teammate who posted it and the one it went to. */
+export const TeamHubContractParty = Schema.Literals(["author", "assignee"]);
+export type TeamHubContractParty = typeof TeamHubContractParty.Type;
 
 export const TeamHubTask = Schema.Struct({
   id: Id,
@@ -45,6 +51,11 @@ export const TeamHubTask = Schema.Struct({
   text: Text,
   status: Schema.Literals(["suggested", "accepted", "dismissed"]),
   contract: Schema.NullOr(TeamHubContractRef),
+  /**
+   * Whose review the contract's current sha is waiting on. `null` means both sides agreed
+   * (or there is no contract). The assignee can only accept while it is not `author`.
+   */
+  contractAwaiting: Schema.NullOr(TeamHubContractParty),
   createdAt: Schema.Number,
 });
 export type TeamHubTask = typeof TeamHubTask.Type;
@@ -247,6 +258,25 @@ export const TeamHubSetDomains = Schema.Struct({
 });
 export type TeamHubSetDomains = typeof TeamHubSetDomains.Type;
 
+/**
+ * Proposes a new commit of a suggested task's contract, on the same branch and path. Either
+ * side can revise; the other side then has to agree before work starts.
+ */
+export const TeamHubReviseContract = Schema.Struct({
+  type: Schema.Literal("revise_contract"),
+  taskId: Id,
+  sha: Sha,
+});
+export type TeamHubReviseContract = typeof TeamHubReviseContract.Type;
+
+/** Agrees to the contract commit the task is waiting on. `sha` guards against a newer revision. */
+export const TeamHubAgreeContract = Schema.Struct({
+  type: Schema.Literal("agree_contract"),
+  taskId: Id,
+  sha: Sha,
+});
+export type TeamHubAgreeContract = typeof TeamHubAgreeContract.Type;
+
 export const TeamHubClientMessage = Schema.Union([
   TeamHubPublishSummary,
   TeamHubPostTask,
@@ -255,5 +285,7 @@ export const TeamHubClientMessage = Schema.Union([
   TeamHubReleaseFiles,
   TeamHubPostContractChange,
   TeamHubSetDomains,
+  TeamHubReviseContract,
+  TeamHubAgreeContract,
 ]);
 export type TeamHubClientMessage = typeof TeamHubClientMessage.Type;

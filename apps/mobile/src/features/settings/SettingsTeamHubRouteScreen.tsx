@@ -2,12 +2,14 @@ import { useAtomValue } from "@effect/atom-react";
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import {
   formatTeamHubContract,
+  incomingTeamHubTasks,
   parseTeamHubDomains,
   parseTeamHubLink,
   readTeamHubInvites,
   createTeamHubStateAtomFamily,
   runTeamHubAction,
   teamHubActionErrorMessage,
+  teamHubTaskTurn,
   type TeamHubAction,
 } from "@t3tools/client-runtime/state/team-hub";
 import { createRuntimeCommand } from "@t3tools/client-runtime/state/runtime";
@@ -167,12 +169,9 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
   if (!state) return <Text>Loading team hub…</Text>;
   const snapshot = state.snapshot;
   const self = snapshot?.members.find((member) => member.id === snapshot.selfId);
-  const tasks =
-    snapshot?.tasks.filter(
-      (task) =>
-        task.status === "suggested" &&
-        (task.assigneeId === null || task.assigneeId === snapshot.selfId),
-    ) ?? [];
+  const tasks = incomingTeamHubTasks(snapshot, { includeWaiting: true });
+  const memberName = (memberId: string | null) =>
+    snapshot?.members.find((member) => member.id === memberId)?.name ?? "Teammate";
   return (
     <View className="gap-4">
       {state.url === null ? (
@@ -376,32 +375,73 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
                 {tasks.length === 0 && (
                   <Text className="text-foreground-muted">No incoming tasks.</Text>
                 )}
-                {tasks.map((task) => (
-                  <View key={task.id} className="gap-2 rounded-xl bg-grouped-card p-3">
-                    <Text>{task.text}</Text>
-                    {task.contract !== null && (
-                      <Text className="text-foreground-muted">
-                        Contract: {formatTeamHubContract(task.contract)}
-                      </Text>
-                    )}
-                    <View className="flex-row gap-2">
-                      <Action
-                        label="Accept"
-                        disabled={busy || state.status !== "connected"}
-                        onPress={() =>
-                          void act({ type: "decideTask", taskId: task.id, decision: "accepted" })
-                        }
-                      />
-                      <Action
-                        label="Dismiss"
-                        disabled={busy}
-                        onPress={() =>
-                          void act({ type: "decideTask", taskId: task.id, decision: "dismissed" })
-                        }
-                      />
+                {tasks.map((task) => {
+                  const turn = teamHubTaskTurn(task, snapshot.selfId);
+                  return (
+                    <View key={task.id} className="gap-2 rounded-xl bg-grouped-card p-3">
+                      <Text>{task.text}</Text>
+                      {task.contract !== null && (
+                        <Text className="text-foreground-muted">
+                          Contract: {formatTeamHubContract(task.contract)}
+                        </Text>
+                      )}
+                      {turn === "agree" && (
+                        <Text className="text-foreground-muted">
+                          {memberName(task.assigneeId)} revised the contract. Agree so work can
+                          start, or ask your agent to revise it.
+                        </Text>
+                      )}
+                      {turn === "waiting" && (
+                        <Text className="text-foreground-muted">
+                          Waiting for {memberName(task.authorId)} to agree to the revised contract.
+                        </Text>
+                      )}
+                      {turn === "agree" ? (
+                        <View className="flex-row gap-2">
+                          <Action
+                            label="Agree"
+                            disabled={busy || state.status !== "connected"}
+                            onPress={() =>
+                              void act({
+                                type: "publish",
+                                input: {
+                                  type: "agree_contract",
+                                  taskId: task.id,
+                                  sha: task.contract?.sha ?? "",
+                                },
+                              })
+                            }
+                          />
+                        </View>
+                      ) : (
+                        <View className="flex-row gap-2">
+                          <Action
+                            label="Accept"
+                            disabled={busy || state.status !== "connected" || turn === "waiting"}
+                            onPress={() =>
+                              void act({
+                                type: "decideTask",
+                                taskId: task.id,
+                                decision: "accepted",
+                              })
+                            }
+                          />
+                          <Action
+                            label="Dismiss"
+                            disabled={busy}
+                            onPress={() =>
+                              void act({
+                                type: "decideTask",
+                                taskId: task.id,
+                                decision: "dismissed",
+                              })
+                            }
+                          />
+                        </View>
+                      )}
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
               <View className="gap-1">
                 <Text className="font-t3-medium">Recent activity</Text>

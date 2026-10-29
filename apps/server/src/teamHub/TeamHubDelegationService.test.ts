@@ -61,7 +61,18 @@ function makeHarness(
     selfId: alice.id,
     members: options.members ?? [alice, bob],
     summaries: [],
-    tasks: [],
+    tasks: [
+      {
+        id: "task",
+        authorId: bob.id,
+        assigneeId: alice.id,
+        text: "Build the login page",
+        status: "suggested",
+        contract,
+        contractAwaiting: "assignee",
+        createdAt: 1,
+      },
+    ],
     notes: [],
     claims: [],
     contractChanges: [],
@@ -176,6 +187,53 @@ describe("TeamHubDelegationService", () => {
       expect(result.assigneeId).toBeNull();
       expect(harness.gitCalls).toEqual([]);
       expect(harness.published).toHaveLength(1);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  const review = (input: { taskId?: string; decision: "agree" | "revise"; sha: string }) =>
+    Effect.gen(function* () {
+      const delegation = yield* TeamHubDelegationService;
+      return yield* delegation.reviewContract({
+        projectId,
+        taskId: input.taskId ?? "task",
+        decision: input.decision,
+        sha: input.sha,
+      });
+    });
+
+  it.effect("revises a contract only after the new commit is on the contract branch", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const revised = "c".repeat(40);
+      yield* review({ decision: "revise", sha: revised });
+      expect(harness.gitCalls[1]).toEqual(["merge-base", "--is-ancestor", revised, "FETCH_HEAD"]);
+      expect(harness.published).toEqual([
+        { type: "revise_contract", taskId: "task", sha: revised },
+      ]);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("refuses an unpushed revision without publishing", () => {
+    const harness = makeHarness({ notAncestor: true });
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(review({ decision: "revise", sha: "c".repeat(40) }));
+      expect(error.reason).toBe("contract_not_pushed");
+      expect(harness.published).toEqual([]);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("agrees without touching git and rejects unknown tasks", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      yield* review({ decision: "agree", sha: contract.sha });
+      expect(harness.gitCalls).toEqual([]);
+      expect(harness.published).toEqual([
+        { type: "agree_contract", taskId: "task", sha: contract.sha },
+      ]);
+      const error = yield* Effect.flip(
+        review({ taskId: "missing", decision: "agree", sha: contract.sha }),
+      );
+      expect(error.reason).toBe("task_unavailable");
     }).pipe(Effect.provide(harness.layer));
   });
 });

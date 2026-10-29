@@ -64,6 +64,7 @@ const snapshot: TeamHubSnapshot = {
       text: "Fix the search bug",
       status: "suggested",
       contract: null,
+      contractAwaiting: null,
       createdAt: 1,
     },
   ],
@@ -79,6 +80,7 @@ function makeHarness(
     launchFails?: boolean;
     projects?: ReadonlyArray<OrchestrationProjectShell>;
     recentlyUsedProjectId?: ProjectId;
+    snapshot?: TeamHubSnapshot;
   } = {},
 ) {
   const launched = new Map<ThreadId, { projectId: ProjectId; firstMessage: string }>();
@@ -88,7 +90,7 @@ function makeHarness(
       state: Effect.succeed({
         url: "http://localhost:3000",
         status: "connected" as const,
-        snapshot,
+        snapshot: options.snapshot ?? snapshot,
         error: null,
       }),
       decideTask: (_taskId, decision) =>
@@ -175,6 +177,22 @@ describe("team hub suggested task acceptance", () => {
       const decisions = yield* TeamHubTaskDecisionService;
       const error = yield* decisions.decideTask(taskId, "accepted").pipe(Effect.flip);
       expect(error.reason).toBe("project_missing");
+      expect(harness.launched.size).toBe(0);
+      expect(harness.hubDecisions).toEqual([]);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("refuses to accept a revised contract the author has not agreed to", () => {
+    const pending = {
+      ...snapshot.tasks[0]!,
+      contract: { branch: "contract/search", path: "api/search.yaml", sha: "c".repeat(40) },
+      contractAwaiting: "author" as const,
+    };
+    const harness = makeHarness({ snapshot: { ...snapshot, tasks: [pending] } });
+    return Effect.gen(function* () {
+      const decisions = yield* TeamHubTaskDecisionService;
+      const error = yield* decisions.decideTask(taskId, "accepted").pipe(Effect.flip);
+      expect(error.reason).toBe("contract_pending");
       expect(harness.launched.size).toBe(0);
       expect(harness.hubDecisions).toEqual([]);
     }).pipe(Effect.provide(harness.layer));
