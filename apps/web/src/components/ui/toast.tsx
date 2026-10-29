@@ -30,6 +30,8 @@ import {
   shouldRenderThreadScopedToast,
 } from "./toast.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./tooltip";
+import { notificationQueue, toastManager } from "~/notificationQueue";
+import { NotificationQueue } from "~/components/NotificationQueue";
 
 export type ThreadToastData = {
   threadRef?: ScopedThreadRef | null;
@@ -68,7 +70,6 @@ export type ThreadToastData = {
     | "secondary";
 };
 
-const toastManager = Toast.createToastManager<ThreadToastData>();
 const anchoredToastManager = Toast.createToastManager<ThreadToastData>();
 type ToastId = ReturnType<typeof toastManager.add>;
 const threadToastVisibleTimeoutRemainingMs = new Map<ToastId, number>();
@@ -522,6 +523,7 @@ function ToastProvider({ children, position = "top-right", ...props }: ToastProv
     <Toast.Provider toastManager={toastManager} {...props}>
       {children}
       <Toasts position={position} />
+      <NotificationQueue />
     </Toast.Provider>
   );
 }
@@ -529,6 +531,11 @@ function ToastProvider({ children, position = "top-right", ...props }: ToastProv
 function Toasts({ position }: { position: ToastPosition }) {
   const { toasts } = Toast.useToastManager<ThreadToastData>();
   const activeThreadRef = useActiveThreadRefFromRoute();
+  useEffect(() => {
+    notificationQueue.setFilter((options) =>
+      shouldRenderThreadScopedToast(options.data, activeThreadRef),
+    );
+  }, [activeThreadRef]);
   const isTop = position.startsWith("top");
   const visibleToasts = toasts.filter((toast) =>
     shouldRenderThreadScopedToast(toast.data, activeThreadRef),
