@@ -8,8 +8,11 @@ import type {
   TeamHubSnapshot,
 } from "@t3tools/contracts/teamHub";
 import * as Effect from "effect/Effect";
-import { WS_METHODS } from "@t3tools/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { WS_METHODS, type ThreadId } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
+import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import type { EnvironmentShellState } from "./shell.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { createEnvironmentRpcSubscriptionAtomFamily } from "./runtime.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
@@ -155,9 +158,35 @@ export const readTeamHubNetworkState = Effect.fn("clientRuntime.teamHub.readNetw
   },
 );
 
+/** HTTP acceptance can finish before the shell subscription delivers the new thread. */
+export const waitForTeamHubThread = Effect.fn("clientRuntime.teamHub.waitForThread")(function* (
+  registry: AtomRegistry.AtomRegistry,
+  shell: Atom.Atom<EnvironmentShellState>,
+  threadId: ThreadId,
+) {
+  yield* AtomRegistry.toStream(registry, shell).pipe(
+    Stream.filter(
+      (state) =>
+        Option.isSome(state.snapshot) &&
+        state.snapshot.value.threads.some(
+          (thread) => thread.id === threadId && thread.deletedAt === null,
+        ),
+    ),
+    Stream.runHead,
+    Effect.timeout("15 seconds"),
+    Effect.mapError(
+      () => new Error("Task accepted, but its thread has not loaded. Reconnect to see it."),
+    ),
+  );
+});
+
 export const runTeamHubAction = Effect.fn("clientRuntime.teamHub.action")(function* (
   prepared: PreparedConnection,
   action: TeamHubAction,
+  synchronization?: {
+    readonly registry: AtomRegistry.AtomRegistry;
+    readonly shell: Atom.Atom<EnvironmentShellState>;
+  },
 ) {
   const signer = yield* Effect.serviceOption(ManagedRelay.ManagedRelayDpopSigner);
   const remoteAuthorization = yield* Effect.serviceOption(
@@ -248,7 +277,7 @@ export const runTeamHubAction = Effect.fn("clientRuntime.teamHub.action")(functi
           client.removeMember({ headers, payload: { memberId: action.memberId } }),
       });
     case "decideTask":
-      return yield* executeAuthenticatedEnvironmentHttpRequest({
+      const result = yield* executeAuthenticatedEnvironmentHttpRequest({
         ...common,
         url: (base) => makeEnvironmentHttpApiUrlBuilder(base).teamHub.decideTask(),
         request: ({ client, headers }) =>
@@ -257,5 +286,13 @@ export const runTeamHubAction = Effect.fn("clientRuntime.teamHub.action")(functi
             payload: { taskId: action.taskId, decision: action.decision },
           }),
       });
+      if (result.threadId !== null && synchronization) {
+        yield* waitForTeamHubThread(
+          synchronization.registry,
+          synchronization.shell,
+          result.threadId,
+        );
+      }
+      return result;
   }
 });
