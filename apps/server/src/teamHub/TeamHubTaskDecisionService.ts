@@ -4,6 +4,7 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   isProviderAvailable,
   type ModelSelection,
+  type TeamHubTask,
   type ThreadId,
 } from "@t3tools/contracts";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
@@ -65,6 +66,21 @@ export class TeamHubTaskDecisionService extends Context.Service<
     ) => Effect.Effect<{ readonly threadId: ThreadId | null }, TeamHubTaskDecisionError>;
   }
 >()("t3/teamHub/TeamHubTaskDecisionService") {}
+
+/** The first message of an accepted task's thread. A contract pins the agent to the agreed file. */
+export function taskPrompt(task: TeamHubTask, author: string): string {
+  const lines = [task.text, "", `Suggested by ${author}.`];
+  const contract = task.contract;
+  if (contract !== null) {
+    lines.push(
+      "",
+      `Contract: ${contract.path} on branch ${contract.branch} at ${contract.sha}.`,
+      `Fetch it first (git fetch origin ${contract.branch}) and treat that file at that commit as the source of truth for names, parameters, and responses.`,
+      `If it needs to change, push a revision to ${contract.branch} and post a contract change instead of diverging from it.`,
+    );
+  }
+  return lines.join("\n");
+}
 
 const make = Effect.gen(function* () {
   const hub = yield* TeamHubService.TeamHubService;
@@ -197,7 +213,7 @@ const make = Effect.gen(function* () {
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         workspaceStrategy: { type: "root" },
         initialMessage: {
-          text: `${task.text}\n\nSuggested by ${author}.`,
+          text: taskPrompt(task, author),
           attachments: [],
         },
         createdBy: "user",

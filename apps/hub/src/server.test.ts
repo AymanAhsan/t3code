@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vite-plus/test";
+import { TEAM_HUB_PROTOCOL_VERSION } from "@t3tools/contracts/teamHub";
 import { createHubServer } from "./server.ts";
 import { HubStore } from "./store.ts";
 
@@ -67,7 +68,7 @@ describe("team hub server", () => {
     const alice = store.authenticate(admin.credential);
     const bob = store.join(store.createInvite(alice, admin.team.id).token, "Bob");
     const server = await createHubServer(store, { host: "127.0.0.1", port: 0 });
-    const url = `ws://127.0.0.1:${server.port}/ws?version=1`;
+    const url = `ws://127.0.0.1:${server.port}/ws?version=${TEAM_HUB_PROTOCOL_VERSION}`;
     const aliceSocket = new WebSocket(url);
     const bobSocket = new WebSocket(url);
     try {
@@ -138,7 +139,7 @@ describe("team hub server", () => {
       "Bob",
     );
     const server = await createHubServer(store, { host: "127.0.0.1", port: 0, heartbeatMs: 50 });
-    const url = `ws://127.0.0.1:${server.port}/ws?version=1`;
+    const url = `ws://127.0.0.1:${server.port}/ws?version=${TEAM_HUB_PROTOCOL_VERSION}`;
     const responsive = new WebSocket(url);
     const silent = new WebSocket(url, { autoPong: false });
     try {
@@ -169,7 +170,9 @@ describe("team hub server", () => {
     const server = await createHubServer(store, { host: "127.0.0.1", port: 0 });
     try {
       const status = await new Promise<number>((resolve) => {
-        const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws?version=0`);
+        const socket = new WebSocket(
+          `ws://127.0.0.1:${server.port}/ws?version=${TEAM_HUB_PROTOCOL_VERSION - 1}`,
+        );
         socket.once("unexpected-response", (_request, response) => {
           resolve(response.statusCode ?? 0);
           response.resume();

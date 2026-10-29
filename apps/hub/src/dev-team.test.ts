@@ -34,7 +34,12 @@ it("enrolls Alice and Bob with distinct persistent credentials and preserves the
     expect(bob.name).toBe("Bob");
     expect(bob.role).toBe("member");
     expect(bob.team_id).toBe(alice.team_id);
-    store.publish(bob, { type: "post_task", text: "Review the demo", assigneeId: alice.id });
+    store.publish(bob, {
+      type: "post_task",
+      text: "Review the demo",
+      assigneeId: alice.id,
+      contract: null,
+    });
     NodeFS.writeFileSync(
       sessions[0]!.settingsPath,
       JSON.stringify({ teamHubUrl: "old", customSetting: true }),

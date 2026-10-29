@@ -3,6 +3,7 @@ import type {
   TeamHubClientMessage,
   TeamHubJoinInput,
   TeamHubBootstrapInput,
+  TeamHubContractRef,
   TeamHubNetworkInput,
   TeamHubSnapshot,
 } from "@t3tools/contracts/teamHub";
@@ -36,6 +37,20 @@ export function incomingTeamHubTasks(snapshot: TeamHubSnapshot | null) {
         (task.assigneeId === null || task.assigneeId === snapshot.selfId),
     ) ?? []
   ).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+}
+
+/** Turns the comma- or newline-separated "Your areas" text into domain globs. */
+export function parseTeamHubDomains(text: string): string[] {
+  const domains = text
+    .split(/[\n,]/)
+    .map((domain) => domain.trim())
+    .filter((domain) => domain.length > 0 && domain.length <= 256);
+  return [...new Set(domains)].slice(0, 20);
+}
+
+/** Short label for a task's contract, such as `api/auth.yaml @ 1a2b3c4 (contract/login)`. */
+export function formatTeamHubContract(contract: TeamHubContractRef): string {
+  return `${contract.path} @ ${contract.sha.slice(0, 7)} (${contract.branch})`;
 }
 
 export type TeamHubAction =
