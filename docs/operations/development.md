@@ -24,6 +24,14 @@ See the [mobile README](../../apps/mobile/README.md) for native builds and Metro
 Flags go directly after the task name, for example `vp run dev --home-dir /tmp/t3code-dev`.
 Add `--browser` to open a browser automatically.
 
+### Testing team features
+
+Use `vp run dev:team` to start a local hub and separate Alice and Bob web/server sessions.
+To work in another repository while running this checkout's app code, use
+`vp run dev:team --project-dir ../notes-api`. No app build is needed.
+See [testing with Alice and Bob](./team-hub.md#local-development-with-alice-and-bob)
+for PowerShell examples, previewing the setup, persistent state, and launcher checks.
+
 ### State and ports
 
 Linked worktrees default to their own `.t3/userdata`, even when `T3CODE_HOME` is set.
