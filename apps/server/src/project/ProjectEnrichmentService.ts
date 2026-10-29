@@ -51,6 +51,10 @@ export class ProjectEnrichmentService extends Context.Service<
     readonly peek: (workspaceRoot: string) => Effect.Effect<ProjectEnrichment>;
     /** Schedule missing metadata for bounded background resolution. */
     readonly request: (workspaceRoot: string) => Effect.Effect<void>;
+    /** Await repository identity for decisions that cannot use pending metadata. */
+    readonly resolveRepositoryIdentity: (
+      workspaceRoot: string,
+    ) => Effect.Effect<RepositoryIdentity | null>;
     /** Read immediately available metadata and schedule anything missing. */
     readonly getAvailable: (workspaceRoot: string) => Effect.Effect<ProjectEnrichment>;
     /** Invalidate workspace-derived metadata. */
@@ -260,6 +264,14 @@ export const make = Effect.fn("ProjectEnrichmentService.make")(function* (
     );
   });
 
+  const awaitRepositoryIdentity = Effect.fn("ProjectEnrichmentService.awaitRepositoryIdentity")(
+    function* (workspaceRoot: string) {
+      const result = yield* Cache.get(repositoryIdentityCache, workspaceRoot);
+      if (Exit.isFailure(result)) return yield* Effect.failCause(result.cause);
+      return result.value;
+    },
+  );
+
   const getAvailable: ProjectEnrichmentService["Service"]["getAvailable"] = Effect.fn(
     "ProjectEnrichmentService.getAvailable",
   )(function* (workspaceRoot) {
@@ -288,6 +300,7 @@ export const make = Effect.fn("ProjectEnrichmentService.make")(function* (
   return ProjectEnrichmentService.of({
     peek,
     request,
+    resolveRepositoryIdentity: awaitRepositoryIdentity,
     getAvailable,
     invalidate,
     subscribeChanges: PubSub.subscribe(changes),
