@@ -349,6 +349,70 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
                   />
                 )}
               </View>
+              <View className="gap-2">
+                <Text className="font-t3-medium">Automatic tasks</Text>
+                <Text className="text-foreground-muted">
+                  Start contract tasks inside your areas from trusted teammates. One automatic task
+                  at a time. Each allowance permits 3 attempts, including failures.
+                </Text>
+                <Text>{self?.autoAccept?.remainingStarts ?? 0} automatic starts remaining.</Text>
+                <Action
+                  label={
+                    (self?.autoAccept?.remainingStarts ?? 0) > 0
+                      ? "Turn off automatic tasks"
+                      : "Allow 3 automatic starts"
+                  }
+                  disabled={
+                    busy ||
+                    state.status !== "connected" ||
+                    ((self?.autoAccept?.remainingStarts ?? 0) === 0 &&
+                      !self?.autoAccept?.trustedAuthorIds.length)
+                  }
+                  onPress={() =>
+                    void act({
+                      type: "publish",
+                      input: {
+                        type: "set_auto_accept",
+                        policy: {
+                          trustedAuthorIds: self?.autoAccept?.trustedAuthorIds ?? [],
+                          remainingStarts: (self?.autoAccept?.remainingStarts ?? 0) > 0 ? 0 : 3,
+                        },
+                      },
+                    })
+                  }
+                />
+                <Text className="text-foreground-muted">
+                  Turning off leaves existing threads running. Changing trust turns off the
+                  allowance.
+                </Text>
+                {snapshot.members
+                  .filter((member) => member.id !== snapshot.selfId)
+                  .map((member) => {
+                    const trusted = self?.autoAccept?.trustedAuthorIds ?? [];
+                    const selected = trusted.includes(member.id);
+                    return (
+                      <Action
+                        key={member.id}
+                        label={(selected ? "Remove trust: " : "Trust: ") + member.name}
+                        disabled={busy || state.status !== "connected"}
+                        onPress={() =>
+                          void act({
+                            type: "publish",
+                            input: {
+                              type: "set_auto_accept",
+                              policy: {
+                                remainingStarts: 0,
+                                trustedAuthorIds: selected
+                                  ? trusted.filter((id) => id !== member.id)
+                                  : [...trusted, member.id],
+                              },
+                            },
+                          })
+                        }
+                      />
+                    );
+                  })}
+              </View>
               {self?.role === "admin" && (
                 <View className="gap-2">
                   <Action
@@ -381,6 +445,12 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
                   return (
                     <View key={task.id} className="gap-2 rounded-xl bg-grouped-card p-3">
                       <Text>{task.text}</Text>
+                      {task.status === "suggested" && task.autoStartAttempted && (
+                        <Text className="text-foreground-muted">
+                          Automatic start attempted. Accept manually to retry, or dismiss to cancel
+                          a pending start.
+                        </Text>
+                      )}
                       {task.contract !== null && (
                         <Text className="text-foreground-muted">
                           Contract: {formatTeamHubContract(task.contract)}
@@ -453,10 +523,33 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
                 {delegatedTeamHubTasks(snapshot).map((task) => (
                   <View key={task.id} className="gap-2 rounded-xl bg-grouped-card p-3">
                     <Text>{task.text}</Text>
+                    {task.status === "suggested" && task.autoStartAttempted && (
+                      <Text className="text-foreground-muted">
+                        Automatic start attempted. Accept manually to retry, or dismiss to cancel a
+                        pending start.
+                      </Text>
+                    )}
                     <Text className="text-foreground-muted">
                       {memberName(task.assigneeId)} ·{" "}
                       {task.status === "done" ? "Done" : "In progress"}
+                      {task.autoStarted ? " · Started automatically" : ""}
                     </Text>
+                    {task.autoStarted &&
+                      task.threadId !== null &&
+                      task.assigneeId === snapshot.selfId && (
+                        <Action
+                          label="Open thread"
+                          disabled={false}
+                          onPress={() =>
+                            navigation.dispatch(
+                              CommonActions.navigate("Thread", {
+                                environmentId: prepared.environmentId,
+                                threadId: task.threadId,
+                              }),
+                            )
+                          }
+                        />
+                      )}
                     {task.result !== null && (
                       <>
                         <Text>{task.result.description}</Text>

@@ -202,6 +202,22 @@ export async function createHubServer(
         broadcast(member.team_id);
         return json(response, 200, { ok: true });
       }
+      if (
+        request.method === "POST" &&
+        (url.pathname === "/api/tasks/auto-start" ||
+          url.pathname === "/api/tasks/auto-start-release")
+      ) {
+        const member = authenticate(store, request);
+        const input = await body(request);
+        const taskId = string(input.taskId, "task ID");
+        const token = string(input.token, "attempt token");
+        const releasing = url.pathname.endsWith("release");
+        const changed = releasing
+          ? store.releaseAutoStart(member, taskId, token)
+          : store.reserveAutoStart(member, taskId, token, string(input.sha, "contract commit"));
+        if (changed) broadcast(member.team_id);
+        return json(response, 200, { reserved: !releasing && changed });
+      }
       if (request.method === "POST" && url.pathname === "/api/tasks/decide") {
         const member = authenticate(store, request);
         const input = await body(request);
@@ -209,7 +225,13 @@ export async function createHubServer(
           throw new HubError("Invalid decision", 400);
         }
         const threadId = input.threadId === undefined ? null : decodeThreadId(input.threadId);
-        store.decideTask(member, string(input.taskId, "task ID"), input.decision, threadId);
+        store.decideTask(
+          member,
+          string(input.taskId, "task ID"),
+          input.decision,
+          threadId,
+          input.autoStartToken === undefined ? null : string(input.autoStartToken, "attempt token"),
+        );
         broadcast(member.team_id);
         return json(response, 200, { ok: true });
       }

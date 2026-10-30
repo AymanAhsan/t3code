@@ -641,10 +641,14 @@ const RuntimeMiscDependenciesLive = RuntimeCoreDependenciesLive.pipe(
 );
 
 // Launches threads for accepted team tasks, so it consumes the core services.
-const RuntimeDependenciesLive = Layer.mergeAll(
+const TeamHubRuntimeDependenciesLive = Layer.mergeAll(
   TeamHubTaskDecisionService.layer,
   TeamHubDelegationService.layer,
 ).pipe(Layer.provideMerge(RuntimeMiscDependenciesLive));
+
+const RuntimeDependenciesLive = TeamHubTaskDecisionService.automaticTasksLayer.pipe(
+  Layer.provideMerge(TeamHubRuntimeDependenciesLive),
+);
 
 const commandReadinessLayer = HttpRouter.middleware(
   (httpEffect) =>
