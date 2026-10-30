@@ -10,6 +10,7 @@ import { useCallback, useRef, useState, type ReactElement } from "react";
 
 import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
 import { readLocalApi } from "../../localApi";
+import { notificationQueue } from "../../notificationQueue";
 import { assetEnvironment } from "../../state/assets";
 import { readPreparedConnection } from "../../state/session";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
@@ -89,7 +90,6 @@ export function MediaActions({
     menuOpen.current = true;
     setTooltipOpen(false);
     let failureTitle = "Could not open media menu";
-    let progressToast: ReturnType<typeof toastManager.add> | undefined;
     try {
       const noun = source.kind === "image" ? "image" : "video";
       const unavailable = source.src === null && source.asset === undefined;
@@ -134,16 +134,16 @@ export function MediaActions({
         });
       } else if (action === "open-file") {
         source.onOpenFile?.();
-      } else if (action === "save" || action === "copy-image") {
-        progressToast = toastManager.add({
-          type: "loading",
-          title: action === "save" ? `Preparing ${noun} download…` : "Copying image…",
+      } else if (action === "save") {
+        notificationQueue.enqueue({
+          title: `Download ${mediaFileName(source)}`,
+          successTitle: `Download started: ${mediaFileName(source)}`,
+          run: save,
         });
-        await (action === "save" ? save() : copyImage());
-        toastManager.update(progressToast, {
-          type: "success",
-          title: action === "save" ? "Download started" : "Image copied",
-        });
+      } else if (action === "copy-image") {
+        // Clipboard writes must begin inside the user gesture.
+        await copyImage();
+        toastManager.add({ type: "success", title: "Image copied" });
       }
     } catch (error) {
       const toast = stackedThreadToast({
@@ -151,8 +151,7 @@ export function MediaActions({
         title: failureTitle,
         description: error instanceof Error ? error.message : "The media action failed.",
       });
-      if (progressToast) toastManager.update(progressToast, toast);
-      else toastManager.add(toast);
+      toastManager.add(toast);
     } finally {
       menuOpen.current = false;
     }
