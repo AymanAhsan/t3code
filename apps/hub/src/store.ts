@@ -14,7 +14,9 @@ import type {
   TeamHubSnapshot,
   TeamHubSummary,
   TeamHubTask,
+  TeamHubTaskResult,
 } from "@t3tools/contracts/teamHub";
+import type { ThreadId } from "@t3tools/contracts";
 
 type TeamRow = { id: string; name: string; repo: string };
 type MemberRow = { id: string; team_id: string; name: string; role: "admin" | "member" };
@@ -22,6 +24,7 @@ type MemberListRow = MemberRow & { domains_json: string };
 type SummaryRow = {
   id: string;
   member_id: string;
+  task_id: string | null;
   branch: string;
   files_json: string;
   description: string;
@@ -32,7 +35,9 @@ type TaskRow = {
   author_id: string;
   assignee_id: string | null;
   text: string;
-  status: "suggested" | "accepted" | "dismissed";
+  status: TeamHubTask["status"];
+  thread_id: ThreadId | null;
+  result_json: string | null;
   contract_json: string | null;
   contract_awaiting: TeamHubContractParty | null;
   created_at: number;
@@ -115,6 +120,9 @@ export class HubStore {
     this.addColumnIfMissing("members", "domains_json", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumnIfMissing("tasks", "contract_json", "TEXT");
     this.addColumnIfMissing("tasks", "contract_awaiting", "TEXT");
+    this.addColumnIfMissing("tasks", "thread_id", "TEXT");
+    this.addColumnIfMissing("tasks", "result_json", "TEXT");
+    this.addColumnIfMissing("summaries", "task_id", "TEXT");
     const storedKey = this.db.prepare("SELECT value FROM meta WHERE key='signing_key'").get() as
       | { value: string }
       | undefined;
@@ -317,13 +325,11 @@ export class HubStore {
       .all(member.team_id) as MemberListRow[];
     const summaries = this.db
       .prepare(
-        "SELECT id,member_id,branch,files_json,description,created_at FROM summaries WHERE team_id=? ORDER BY created_at DESC LIMIT 50",
+        "SELECT id,member_id,task_id,branch,files_json,description,created_at FROM summaries WHERE team_id=? ORDER BY created_at DESC LIMIT 50",
       )
       .all(member.team_id) as SummaryRow[];
     const tasks = this.db
-      .prepare(
-        "SELECT id,author_id,assignee_id,text,status,contract_json,contract_awaiting,created_at FROM tasks WHERE team_id=? ORDER BY created_at DESC LIMIT 100",
-      )
+      .prepare("SELECT * FROM tasks WHERE team_id=? ORDER BY created_at DESC LIMIT 100")
       .all(member.team_id) as TaskRow[];
     const notes = this.db
       .prepare(
@@ -353,6 +359,7 @@ export class HubStore {
       summaries: summaries.map((row): TeamHubSummary => ({
         id: row.id,
         memberId: row.member_id,
+        taskId: row.task_id,
         branch: row.branch,
         files: JSON.parse(row.files_json) as string[],
         description: row.description,
@@ -364,6 +371,9 @@ export class HubStore {
         assigneeId: row.assignee_id,
         text: row.text,
         status: row.status,
+        threadId: row.thread_id,
+        result:
+          row.result_json === null ? null : (JSON.parse(row.result_json) as TeamHubTaskResult),
         contract:
           row.contract_json === null ? null : (JSON.parse(row.contract_json) as TeamHubContractRef),
         contractAwaiting: row.contract_awaiting,
@@ -395,8 +405,11 @@ export class HubStore {
     const id = NodeCrypto.randomUUID();
     switch (message.type) {
       case "publish_summary":
+        if (message.taskId !== undefined) this.assignedTask(member, message.taskId);
         this.db
-          .prepare("INSERT INTO summaries VALUES (?,?,?,?,?,?,?)")
+          .prepare(
+            "INSERT INTO summaries (id,team_id,member_id,branch,files_json,description,created_at,task_id) VALUES (?,?,?,?,?,?,?,?)",
+          )
           .run(
             id,
             member.team_id,
@@ -405,8 +418,52 @@ export class HubStore {
             JSON.stringify(message.files),
             message.description,
             createdAt,
+            message.taskId ?? null,
           );
         break;
+      case "complete_task": {
+        const task = this.assignedTask(member, message.taskId);
+        if (task.status !== "accepted")
+          throw new HubError("Only accepted tasks can be completed", 409);
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db
+            .prepare("UPDATE tasks SET status='done',result_json=? WHERE id=?")
+            .run(JSON.stringify(message.result), task.id);
+          this.db
+            .prepare(
+              "INSERT INTO summaries (id,team_id,member_id,branch,files_json,description,created_at,task_id) VALUES (?,?,?,?,?,?,?,?)",
+            )
+            .run(
+              id,
+              member.team_id,
+              member.id,
+              message.result.branch,
+              "[]",
+              message.result.description,
+              createdAt,
+              task.id,
+            );
+          this.db.exec("COMMIT");
+        } catch (error) {
+          this.db.exec("ROLLBACK");
+          throw error;
+        }
+        break;
+      }
+      case "reopen_task": {
+        const task = this.db
+          .prepare("SELECT * FROM tasks WHERE id=? AND team_id=?")
+          .get(message.taskId, member.team_id) as TaskRow | undefined;
+        if (!task) throw new HubError("Task unavailable", 404);
+        if (task.author_id !== member.id && task.assignee_id !== member.id)
+          throw new HubError("Only the task's author or assignee can reopen it", 403);
+        if (task.status !== "done") throw new HubError("Only completed tasks can be reopened", 409);
+        this.db
+          .prepare("UPDATE tasks SET status='accepted',result_json=NULL WHERE id=?")
+          .run(task.id);
+        break;
+      }
       case "post_task":
         if (
           message.assigneeId &&
@@ -518,6 +575,18 @@ export class HubStore {
     }
   }
 
+  private assignedTask(member: MemberRow, taskId: string) {
+    const task = this.db
+      .prepare("SELECT * FROM tasks WHERE id=? AND team_id=?")
+      .get(taskId, member.team_id) as TaskRow | undefined;
+    if (!task) throw new HubError("Task unavailable", 404);
+    if (task.assignee_id !== member.id)
+      throw new HubError("Only the task's assignee can report work", 403);
+    if (task.status !== "accepted" && task.status !== "done")
+      throw new HubError("Task has not been accepted", 409);
+    return task;
+  }
+
   /** A suggested contract task and which side `member` is on. Only the two sides may review it. */
   private contractTask(member: MemberRow, taskId: string) {
     const task = this.db
@@ -534,7 +603,12 @@ export class HubStore {
     return { task, party, contract: JSON.parse(task.contract_json) as TeamHubContractRef };
   }
 
-  decideTask(member: MemberRow, taskId: string, decision: "accepted" | "dismissed") {
+  decideTask(
+    member: MemberRow,
+    taskId: string,
+    decision: "accepted" | "dismissed",
+    threadId: ThreadId | null = null,
+  ) {
     if (decision === "accepted") {
       const awaiting = this.db
         .prepare("SELECT contract_awaiting FROM tasks WHERE id=? AND team_id=?")
@@ -545,9 +619,16 @@ export class HubStore {
     }
     const result = this.db
       .prepare(
-        "UPDATE tasks SET status=? WHERE id=? AND team_id=? AND status='suggested' AND (assignee_id IS NULL OR assignee_id=?)",
+        "UPDATE tasks SET status=?,assignee_id=?,thread_id=?,contract_awaiting=NULL WHERE id=? AND team_id=? AND status='suggested' AND (assignee_id IS NULL OR assignee_id=?)",
       )
-      .run(decision, taskId, member.team_id, member.id);
+      .run(
+        decision,
+        member.id,
+        decision === "accepted" ? threadId : null,
+        taskId,
+        member.team_id,
+        member.id,
+      );
     if (!result.changes) throw new HubError("Task unavailable", 404);
   }
 }

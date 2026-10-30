@@ -4,9 +4,11 @@ import type * as NodeStream from "node:stream";
 import { Schema } from "effect";
 import WebSocket, { WebSocketServer } from "ws";
 import { TEAM_HUB_PROTOCOL_VERSION, TeamHubClientMessage } from "@t3tools/contracts/teamHub";
+import { ThreadId } from "@t3tools/contracts";
 import { HubError, HubStore } from "./store.ts";
 
 const decodeClientMessage = Schema.decodeUnknownSync(TeamHubClientMessage);
+const decodeThreadId = Schema.decodeUnknownSync(ThreadId);
 
 type Connected = {
   socket: WebSocket;
@@ -206,7 +208,8 @@ export async function createHubServer(
         if (input.decision !== "accepted" && input.decision !== "dismissed") {
           throw new HubError("Invalid decision", 400);
         }
-        store.decideTask(member, string(input.taskId, "task ID"), input.decision);
+        const threadId = input.threadId === undefined ? null : decodeThreadId(input.threadId);
+        store.decideTask(member, string(input.taskId, "task ID"), input.decision, threadId);
         broadcast(member.team_id);
         return json(response, 200, { ok: true });
       }

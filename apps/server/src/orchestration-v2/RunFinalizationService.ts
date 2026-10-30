@@ -120,6 +120,7 @@ export const observerLive = Layer.effect(
               if (!latest) return;
               const completedThread = yield* projections.getThreadShell(threadId);
               yield* hub.value.publishCheckpoint({
+                threadId,
                 repository: repository.canonicalKey,
                 branch: local.refName!,
                 files: latest.files.map((file) => file.path),

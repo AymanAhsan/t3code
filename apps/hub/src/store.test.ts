@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { HubStore } from "./store.ts";
+import { ThreadId } from "@t3tools/contracts";
 
 const dirs: string[] = [];
 const open = () => {
@@ -18,6 +19,77 @@ afterEach(() => {
 });
 
 describe("team hub store", () => {
+  it("links accepted threads and progress, persists completion, and supports reopening and completing again", () => {
+    const { dir, store } = open();
+    const admin = store.bootstrap(store.setupToken!, "Team", "repo", "Alice");
+    const alice = store.authenticate(admin.credential);
+    const bob = store.authenticate(
+      store.join(store.createInvite(alice, alice.team_id).token, "Bob").credential,
+    );
+    const eve = store.authenticate(
+      store.join(store.createInvite(alice, alice.team_id).token, "Eve").credential,
+    );
+    store.publish(alice, {
+      type: "post_task",
+      assigneeId: null,
+      text: "Build API",
+      contract: null,
+    });
+    const taskId = store.snapshot(alice, new Set()).tasks[0]!.id;
+    const result = {
+      branch: "work/api",
+      sha: "a".repeat(40),
+      description: "Built API; contract tests passed",
+    };
+    const complete = { type: "complete_task" as const, taskId, result };
+    expect(() => store.publish(bob, complete)).toThrow();
+    const threadId = ThreadId.make("bob-thread");
+    store.decideTask(bob, taskId, "accepted", threadId);
+    expect(store.snapshot(alice, new Set()).tasks[0]).toMatchObject({
+      assigneeId: bob.id,
+      threadId,
+      contractAwaiting: null,
+    });
+    expect(() => store.publish(alice, complete)).toThrow("assignee");
+    expect(() => store.publish(eve, complete)).toThrow("assignee");
+    store.publish(bob, {
+      type: "publish_summary",
+      taskId,
+      branch: result.branch,
+      files: ["api.ts"],
+      description: "Progress",
+    });
+    expect(store.snapshot(alice, new Set()).tasks[0]?.status).toBe("accepted");
+    expect(store.snapshot(alice, new Set()).summaries[0]?.taskId).toBe(taskId);
+    store.publish(bob, complete);
+    expect(() => store.publish(bob, complete)).toThrow("accepted");
+    store.close();
+    const reopened = new HubStore(dir);
+    try {
+      expect(reopened.snapshot(alice, new Set()).tasks[0]).toMatchObject({
+        status: "done",
+        result,
+        threadId,
+      });
+      expect(reopened.snapshot(alice, new Set()).summaries).toHaveLength(2);
+      expect(() => reopened.publish(eve, { type: "reopen_task", taskId })).toThrow(
+        "author or assignee",
+      );
+      reopened.publish(alice, { type: "reopen_task", taskId });
+      expect(reopened.snapshot(alice, new Set()).tasks[0]).toMatchObject({
+        status: "accepted",
+        result: null,
+        threadId,
+      });
+      expect(() => reopened.publish(alice, { type: "reopen_task", taskId })).toThrow("completed");
+      reopened.publish(bob, complete);
+      reopened.publish(bob, { type: "reopen_task", taskId });
+      expect(reopened.snapshot(alice, new Set()).tasks[0]?.status).toBe("accepted");
+    } finally {
+      reopened.close();
+    }
+  });
+
   it("bootstraps once and preserves the setup link across an interrupted first start", () => {
     const { dir, store } = open();
     const token = store.setupToken;
@@ -143,10 +215,16 @@ describe("team hub store", () => {
     const admin = store.bootstrap(store.setupToken!, "Engineering", "repo", "Alice");
     const alice = store.authenticate(admin.credential);
     store.publish(alice, { type: "post_task", assigneeId: null, text: "Old task", contract: null });
+    store.publish(alice, {
+      type: "publish_summary",
+      branch: "main",
+      files: [],
+      description: "Old summary",
+    });
     store.close();
     const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "hub.sqlite"));
     db.exec(
-      "ALTER TABLE members DROP COLUMN domains_json; ALTER TABLE tasks DROP COLUMN contract_json; ALTER TABLE tasks DROP COLUMN contract_awaiting;",
+      "ALTER TABLE members DROP COLUMN domains_json; ALTER TABLE tasks DROP COLUMN contract_json; ALTER TABLE tasks DROP COLUMN contract_awaiting; ALTER TABLE tasks DROP COLUMN thread_id; ALTER TABLE tasks DROP COLUMN result_json; ALTER TABLE summaries DROP COLUMN task_id;",
     );
     db.close();
     const migrated = new HubStore(dir);
@@ -157,7 +235,10 @@ describe("team hub store", () => {
         text: "Old task",
         contract: null,
         contractAwaiting: null,
+        threadId: null,
+        result: null,
       });
+      expect(snapshot.summaries[0]).toMatchObject({ description: "Old summary", taskId: null });
     } finally {
       migrated.close();
     }

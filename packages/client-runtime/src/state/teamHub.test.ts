@@ -4,6 +4,7 @@ import type { TeamHubSnapshot, TeamHubTask } from "@t3tools/contracts/teamHub";
 import {
   formatTeamHubContract,
   incomingTeamHubTasks,
+  delegatedTeamHubTasks,
   parseTeamHubDomains,
   parseTeamHubLink,
   withTeamHubOrigin,
@@ -16,6 +17,8 @@ describe("incomingTeamHubTasks", () => {
     assigneeId: "self",
     text: "Review the change",
     status: "suggested",
+    threadId: null,
+    result: null,
     contract: null,
     contractAwaiting: null,
     createdAt: 10,
@@ -78,6 +81,19 @@ describe("incomingTeamHubTasks", () => {
 
   it("has no incoming tasks before joining a team", () => {
     expect(incomingTeamHubTasks(null)).toEqual([]);
+  });
+
+  it("shows accepted and completed handoffs to both parties, outside incoming suggestions", () => {
+    const state = snapshot([
+      task("incoming"),
+      task("working", { status: "accepted" }),
+      task("finished", { status: "done", authorId: "self", assigneeId: "bob" }),
+      task("unrelated", { status: "done", authorId: "alice", assigneeId: "bob" }),
+      task("dismissed", { status: "dismissed" }),
+    ]);
+    expect(delegatedTeamHubTasks(state).map((task) => task.id)).toEqual(["working", "finished"]);
+    expect(incomingTeamHubTasks(state).map((task) => task.id)).toEqual(["incoming"]);
+    expect(delegatedTeamHubTasks(null)).toEqual([]);
   });
 });
 

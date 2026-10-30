@@ -3,7 +3,7 @@ import { ThreadId } from "./baseSchemas.ts";
 
 import { PortSchema } from "./baseSchemas.ts";
 
-export const TEAM_HUB_PROTOCOL_VERSION = 3;
+export const TEAM_HUB_PROTOCOL_VERSION = 4;
 
 const Text = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/));
@@ -23,6 +23,7 @@ export type TeamHubMember = typeof TeamHubMember.Type;
 export const TeamHubSummary = Schema.Struct({
   id: Id,
   memberId: Id,
+  taskId: Schema.NullOr(Id),
   branch: Schema.String,
   files: Schema.Array(Schema.String),
   description: Schema.String,
@@ -44,12 +45,22 @@ export type TeamHubContractRef = typeof TeamHubContractRef.Type;
 export const TeamHubContractParty = Schema.Literals(["author", "assignee"]);
 export type TeamHubContractParty = typeof TeamHubContractParty.Type;
 
+/** A completed task points at pushed work; the hub never stores its code. */
+export const TeamHubTaskResult = Schema.Struct({
+  branch: Text,
+  sha: Sha,
+  description: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
+});
+export type TeamHubTaskResult = typeof TeamHubTaskResult.Type;
+
 export const TeamHubTask = Schema.Struct({
   id: Id,
   authorId: Id,
   assigneeId: Schema.NullOr(Id),
   text: Text,
-  status: Schema.Literals(["suggested", "accepted", "dismissed"]),
+  status: Schema.Literals(["suggested", "accepted", "dismissed", "done"]),
+  threadId: Schema.NullOr(ThreadId),
+  result: Schema.NullOr(TeamHubTaskResult),
   contract: Schema.NullOr(TeamHubContractRef),
   /**
    * Whose review the contract's current sha is waiting on. `null` means both sides agreed
@@ -213,6 +224,7 @@ export const TeamHubTaskDecisionResult = Schema.Struct({
 
 export const TeamHubPublishSummary = Schema.Struct({
   type: Schema.Literal("publish_summary"),
+  taskId: Schema.optional(Id),
   branch: Schema.String.check(Schema.isMaxLength(256)),
   files: Schema.Array(Schema.String.check(Schema.isMaxLength(512))).check(Schema.isMaxLength(200)),
   description: Schema.String.check(Schema.isMaxLength(1000)),
@@ -277,6 +289,17 @@ export const TeamHubAgreeContract = Schema.Struct({
 });
 export type TeamHubAgreeContract = typeof TeamHubAgreeContract.Type;
 
+export const TeamHubCompleteTask = Schema.Struct({
+  type: Schema.Literal("complete_task"),
+  taskId: Id,
+  result: TeamHubTaskResult,
+});
+
+export const TeamHubReopenTask = Schema.Struct({
+  type: Schema.Literal("reopen_task"),
+  taskId: Id,
+});
+
 export const TeamHubClientMessage = Schema.Union([
   TeamHubPublishSummary,
   TeamHubPostTask,
@@ -287,5 +310,7 @@ export const TeamHubClientMessage = Schema.Union([
   TeamHubSetDomains,
   TeamHubReviseContract,
   TeamHubAgreeContract,
+  TeamHubCompleteTask,
+  TeamHubReopenTask,
 ]);
 export type TeamHubClientMessage = typeof TeamHubClientMessage.Type;
