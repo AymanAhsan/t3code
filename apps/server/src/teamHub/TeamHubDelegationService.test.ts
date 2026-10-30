@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   ProjectId,
   ProviderInstanceId,
+  ThreadId,
   type OrchestrationProjectShell,
   type TeamHubClientMessage,
   type TeamHubContractRef,
@@ -53,7 +54,12 @@ const contract: TeamHubContractRef = {
 };
 
 function makeHarness(
-  options: { members?: TeamHubMember[]; fetchFails?: boolean; notAncestor?: boolean } = {},
+  options: {
+    members?: TeamHubMember[];
+    fetchFails?: boolean;
+    notAncestor?: boolean;
+    accepted?: boolean;
+  } = {},
 ) {
   const published: TeamHubClientMessage[] = [];
   const gitCalls: string[][] = [];
@@ -68,7 +74,9 @@ function makeHarness(
         authorId: bob.id,
         assigneeId: alice.id,
         text: "Build the login page",
-        status: "suggested",
+        status: options.accepted ? "accepted" : "suggested",
+        threadId: options.accepted ? ThreadId.make("accepted-thread") : null,
+        result: null,
         contract,
         contractAwaiting: "assignee",
         createdAt: 1,
@@ -118,6 +126,59 @@ const post = (input: { assigneeId?: string | null; contract?: TeamHubContractRef
   });
 
 describe("TeamHubDelegationService", () => {
+  const result = {
+    branch: "work/login-api",
+    sha: "d".repeat(40),
+    description: "Built login API; tests passed",
+  };
+  const complete = (threadId = ThreadId.make("accepted-thread")) =>
+    Effect.gen(function* () {
+      const delegation = yield* TeamHubDelegationService;
+      yield* delegation.completeTask({ projectId, threadId, taskId: "task", result });
+    });
+
+  it.effect(
+    "completes the accepted task's thread only after verifying the result is pushed",
+    () => {
+      const harness = makeHarness({ accepted: true });
+      return Effect.gen(function* () {
+        yield* complete();
+        expect(harness.gitCalls).toEqual([
+          ["fetch", "--quiet", "--no-tags", "origin", "refs/heads/work/login-api"],
+          ["merge-base", "--is-ancestor", result.sha, "FETCH_HEAD"],
+        ]);
+        expect(harness.published).toEqual([{ type: "complete_task", taskId: "task", result }]);
+      }).pipe(Effect.provide(harness.layer));
+    },
+  );
+
+  it.effect("refuses unpushed results without marking the task done", () => {
+    const harness = makeHarness({ accepted: true, notAncestor: true });
+    return Effect.gen(function* () {
+      expect((yield* Effect.flip(complete())).reason).toBe("result_not_pushed");
+      expect(harness.published).toEqual([]);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("refuses completion from another thread", () => {
+    const harness = makeHarness({ accepted: true });
+    return Effect.gen(function* () {
+      expect((yield* Effect.flip(complete(ThreadId.make("unrelated-thread")))).reason).toBe(
+        "completion_unavailable",
+      );
+      expect(harness.gitCalls).toEqual([]);
+      expect(harness.published).toEqual([]);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("refuses completion before acceptance", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      expect((yield* Effect.flip(complete())).reason).toBe("completion_unavailable");
+      expect(harness.published).toEqual([]);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
   it.effect("routes a contract task to the owner after confirming the commit is pushed", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

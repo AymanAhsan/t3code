@@ -1,4 +1,9 @@
-import type { ProjectId, TeamHubContractRef } from "@t3tools/contracts";
+import type {
+  ProjectId,
+  TeamHubContractRef,
+  TeamHubTaskResult,
+  ThreadId,
+} from "@t3tools/contracts";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -19,6 +24,8 @@ export class TeamHubDelegationError extends Schema.TaggedError<TeamHubDelegation
       "no_assignee",
       "ambiguous_assignee",
       "contract_not_pushed",
+      "result_not_pushed",
+      "completion_unavailable",
       "task_unavailable",
       "hub_failed",
     ]),
@@ -40,6 +47,10 @@ export class TeamHubDelegationError extends Schema.TaggedError<TeamHubDelegation
         return `Several teammates own ${this.path}: ${this.candidates?.join(", ")}. Pass assigneeId to pick one.`;
       case "contract_not_pushed":
         return "The contract commit is not on the remote branch yet. Push the contract branch first.";
+      case "result_not_pushed":
+        return "The result commit is not on the remote branch yet. Push the work branch first.";
+      case "completion_unavailable":
+        return "Only the accepted task's thread can complete it.";
       case "task_unavailable":
         return "That task is not a suggested contract task you are part of.";
       case "hub_failed":
@@ -70,6 +81,16 @@ export class TeamHubDelegationService extends Context.Service<
       readonly decision: "agree" | "revise";
       readonly sha: string;
     }) => Effect.Effect<void, TeamHubDelegationError>;
+    readonly completeTask: (input: {
+      readonly projectId: ProjectId;
+      readonly threadId: ThreadId;
+      readonly taskId: string;
+      readonly result: TeamHubTaskResult;
+    }) => Effect.Effect<void, TeamHubDelegationError>;
+    readonly reopenTask: (input: {
+      readonly projectId: ProjectId;
+      readonly taskId: string;
+    }) => Effect.Effect<void, TeamHubDelegationError>;
   }
 >()("t3/teamHub/TeamHubDelegationService") {}
 
@@ -80,7 +101,9 @@ const make = Effect.gen(function* () {
 
   const projectRoot = (projectId: ProjectId, repo: string) =>
     Effect.gen(function* () {
-      const project = yield* projects.getShell(projectId).pipe(Effect.orElseSucceed(Option.none));
+      const project = yield* projects
+        .getShell(projectId, { resolveRepositoryIdentity: true })
+        .pipe(Effect.orElseSucceed(Option.none));
       if (
         Option.isNone(project) ||
         project.value.repositoryIdentity?.canonicalKey !== normalizeGitRemoteUrl(repo)
@@ -94,7 +117,7 @@ const make = Effect.gen(function* () {
     new TeamHubDelegationError({ reason: "hub_failed", detail: cause.reason, cause });
 
   // True when `sha` is the remote branch tip or one of its ancestors.
-  const isPushed = (cwd: string, contract: TeamHubContractRef) =>
+  const isPushed = (cwd: string, contract: { readonly branch: string; readonly sha: string }) =>
     Effect.gen(function* () {
       const remote = yield* git.resolvePrimaryRemoteName(cwd);
       const fetched = yield* git.execute({
@@ -171,7 +194,36 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError(hubFailed));
   });
 
-  return TeamHubDelegationService.of({ postTask, reviewContract });
+  const completeTask: TeamHubDelegationService["Service"]["completeTask"] = Effect.fn(
+    "TeamHubDelegationService.completeTask",
+  )(function* ({ projectId, threadId, taskId, result }) {
+    const snapshot = (yield* hub.state).snapshot;
+    if (snapshot === null) return yield* new TeamHubDelegationError({ reason: "disconnected" });
+    const cwd = yield* projectRoot(projectId, snapshot.team.repo);
+    const task = snapshot.tasks.find((task) => task.id === taskId);
+    if (
+      !task ||
+      task.status !== "accepted" ||
+      task.assigneeId !== snapshot.selfId ||
+      task.threadId !== threadId
+    ) {
+      return yield* new TeamHubDelegationError({ reason: "completion_unavailable" });
+    }
+    if (!(yield* isPushed(cwd, result)))
+      return yield* new TeamHubDelegationError({ reason: "result_not_pushed" });
+    yield* hub.publish({ type: "complete_task", taskId, result }).pipe(Effect.mapError(hubFailed));
+  });
+
+  const reopenTask: TeamHubDelegationService["Service"]["reopenTask"] = Effect.fn(
+    "TeamHubDelegationService.reopenTask",
+  )(function* ({ projectId, taskId }) {
+    const snapshot = (yield* hub.state).snapshot;
+    if (snapshot === null) return yield* new TeamHubDelegationError({ reason: "disconnected" });
+    yield* projectRoot(projectId, snapshot.team.repo);
+    yield* hub.publish({ type: "reopen_task", taskId }).pipe(Effect.mapError(hubFailed));
+  });
+
+  return TeamHubDelegationService.of({ postTask, reviewContract, completeTask, reopenTask });
 });
 
 export const layer = Layer.effect(TeamHubDelegationService, make);

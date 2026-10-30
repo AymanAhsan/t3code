@@ -3,7 +3,7 @@ import { ThreadId } from "./baseSchemas.ts";
 
 import { PortSchema } from "./baseSchemas.ts";
 
-export const TEAM_HUB_PROTOCOL_VERSION = 4;
+export const TEAM_HUB_PROTOCOL_VERSION = 6;
 
 const Text = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/));
@@ -22,6 +22,17 @@ export const TeamHubActivity = Schema.Struct({
 });
 export type TeamHubActivity = typeof TeamHubActivity.Type;
 
+/** A finite allowance must be renewed by the member; completing work never refills it. */
+export const TeamHubAutoAccept = Schema.Struct({
+  trustedAuthorIds: Schema.Array(Id).check(Schema.isMaxLength(100)),
+  remainingStarts: Schema.Number.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: 0, maximum: 5 }),
+  ),
+});
+
+export type TeamHubAutoAccept = typeof TeamHubAutoAccept.Type;
+
 export const TeamHubMember = Schema.Struct({
   id: Id,
   name: Text,
@@ -29,12 +40,14 @@ export const TeamHubMember = Schema.Struct({
   online: Schema.Boolean,
   domains: TeamHubDomains,
   activity: TeamHubActivity,
+  autoAccept: Schema.optionalKey(TeamHubAutoAccept),
 });
 export type TeamHubMember = typeof TeamHubMember.Type;
 
 export const TeamHubSummary = Schema.Struct({
   id: Id,
   memberId: Id,
+  taskId: Schema.NullOr(Id),
   branch: Schema.String,
   files: Schema.Array(Schema.String),
   description: Schema.String,
@@ -56,12 +69,24 @@ export type TeamHubContractRef = typeof TeamHubContractRef.Type;
 export const TeamHubContractParty = Schema.Literals(["author", "assignee"]);
 export type TeamHubContractParty = typeof TeamHubContractParty.Type;
 
+/** A completed task points at pushed work; the hub never stores its code. */
+export const TeamHubTaskResult = Schema.Struct({
+  branch: Text,
+  sha: Sha,
+  description: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000)),
+});
+export type TeamHubTaskResult = typeof TeamHubTaskResult.Type;
+
 export const TeamHubTask = Schema.Struct({
   id: Id,
   authorId: Id,
   assigneeId: Schema.NullOr(Id),
   text: Text,
-  status: Schema.Literals(["suggested", "accepted", "dismissed"]),
+  status: Schema.Literals(["suggested", "accepted", "dismissed", "done"]),
+  threadId: Schema.NullOr(ThreadId),
+  autoStartAttempted: Schema.optionalKey(Schema.Boolean),
+  autoStarted: Schema.optionalKey(Schema.Boolean),
+  result: Schema.NullOr(TeamHubTaskResult),
   contract: Schema.NullOr(TeamHubContractRef),
   /**
    * Whose review the contract's current sha is waiting on. `null` means both sides agreed
@@ -225,6 +250,7 @@ export const TeamHubTaskDecisionResult = Schema.Struct({
 
 export const TeamHubPublishSummary = Schema.Struct({
   type: Schema.Literal("publish_summary"),
+  taskId: Schema.optional(Id),
   branch: Schema.String.check(Schema.isMaxLength(256)),
   files: Schema.Array(Schema.String.check(Schema.isMaxLength(512))).check(Schema.isMaxLength(200)),
   description: Schema.String.check(Schema.isMaxLength(1000)),
@@ -296,6 +322,22 @@ export const TeamHubSetActivity = Schema.Struct({
 });
 export type TeamHubSetActivity = typeof TeamHubSetActivity.Type;
 
+export const TeamHubCompleteTask = Schema.Struct({
+  type: Schema.Literal("complete_task"),
+  taskId: Id,
+  result: TeamHubTaskResult,
+});
+
+export const TeamHubReopenTask = Schema.Struct({
+  type: Schema.Literal("reopen_task"),
+  taskId: Id,
+});
+
+export const TeamHubSetAutoAccept = Schema.Struct({
+  type: Schema.Literal("set_auto_accept"),
+  policy: TeamHubAutoAccept,
+});
+
 export const TeamHubClientMessage = Schema.Union([
   TeamHubSetActivity,
   TeamHubPublishSummary,
@@ -305,7 +347,35 @@ export const TeamHubClientMessage = Schema.Union([
   TeamHubReleaseFiles,
   TeamHubPostContractChange,
   TeamHubSetDomains,
+  TeamHubSetAutoAccept,
   TeamHubReviseContract,
   TeamHubAgreeContract,
+  TeamHubCompleteTask,
+  TeamHubReopenTask,
 ]);
 export type TeamHubClientMessage = typeof TeamHubClientMessage.Type;
+
+/**
+ * Matches a repository-relative path against a domain glob. `**` spans
+ * directories, `*` and `?` stay within one segment, and a trailing `/` owns
+ * everything below it.
+ */
+export function matchesDomain(path: string, glob: string): boolean {
+  const pattern = glob.endsWith("/") ? `${glob}**` : glob;
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index]!;
+    if (char === "*" && pattern[index + 1] === "*") {
+      const slash = pattern[index + 2] === "/";
+      source += slash ? "(?:.*/)?" : ".*";
+      index += slash ? 2 : 1;
+    } else if (char === "*") {
+      source += "[^/]*";
+    } else if (char === "?") {
+      source += "[^/]";
+    } else {
+      source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`^${source}$`).test(path.replace(/^\.?\//, ""));
+}

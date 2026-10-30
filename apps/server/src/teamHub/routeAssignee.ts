@@ -1,29 +1,7 @@
 import type { TeamHubMember } from "@t3tools/contracts";
 
-/**
- * Matches a repository-relative path against a domain glob. `**` spans
- * directories, `*` and `?` stay within one segment, and a trailing `/` owns
- * everything below it.
- */
-export function matchesDomain(path: string, glob: string): boolean {
-  const pattern = glob.endsWith("/") ? `${glob}**` : glob;
-  let source = "";
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index]!;
-    if (char === "*" && pattern[index + 1] === "*") {
-      const slash = pattern[index + 2] === "/";
-      source += slash ? "(?:.*/)?" : ".*";
-      index += slash ? 2 : 1;
-    } else if (char === "*") {
-      source += "[^/]*";
-    } else if (char === "?") {
-      source += "[^/]";
-    } else {
-      source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    }
-  }
-  return new RegExp(`^${source}$`).test(path.replace(/^\.?\//, ""));
-}
+import { matchesDomain } from "@t3tools/contracts/teamHub";
+export { matchesDomain } from "@t3tools/contracts/teamHub";
 
 /**
  * Picks the one teammate whose domains own every given path. Returns no

@@ -8,9 +8,11 @@ import {
   TeamHubClientMessage,
   type TeamHubActivity,
 } from "@t3tools/contracts/teamHub";
+import { ThreadId } from "@t3tools/contracts";
 import { HubError, HubStore } from "./store.ts";
 
 const decodeClientMessage = Schema.decodeUnknownSync(TeamHubClientMessage);
+const decodeThreadId = Schema.decodeUnknownSync(ThreadId);
 
 type Connected = {
   socket: WebSocket;
@@ -220,13 +222,36 @@ export async function createHubServer(
         broadcast(member.team_id);
         return json(response, 200, { ok: true });
       }
+      if (
+        request.method === "POST" &&
+        (url.pathname === "/api/tasks/auto-start" ||
+          url.pathname === "/api/tasks/auto-start-release")
+      ) {
+        const member = authenticate(store, request);
+        const input = await body(request);
+        const taskId = string(input.taskId, "task ID");
+        const token = string(input.token, "attempt token");
+        const releasing = url.pathname.endsWith("release");
+        const changed = releasing
+          ? store.releaseAutoStart(member, taskId, token)
+          : store.reserveAutoStart(member, taskId, token, string(input.sha, "contract commit"));
+        if (changed) broadcast(member.team_id);
+        return json(response, 200, { reserved: !releasing && changed });
+      }
       if (request.method === "POST" && url.pathname === "/api/tasks/decide") {
         const member = authenticate(store, request);
         const input = await body(request);
         if (input.decision !== "accepted" && input.decision !== "dismissed") {
           throw new HubError("Invalid decision", 400);
         }
-        store.decideTask(member, string(input.taskId, "task ID"), input.decision);
+        const threadId = input.threadId === undefined ? null : decodeThreadId(input.threadId);
+        store.decideTask(
+          member,
+          string(input.taskId, "task ID"),
+          input.decision,
+          threadId,
+          input.autoStartToken === undefined ? null : string(input.autoStartToken, "attempt token"),
+        );
         broadcast(member.team_id);
         return json(response, 200, { ok: true });
       }

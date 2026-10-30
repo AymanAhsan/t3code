@@ -53,10 +53,9 @@ export const TeamHubHandlersLive = TeamHubToolkit.toLayer({
         notes: current.notes,
         tasks: current.tasks.filter(
           (task) =>
-            task.status === "suggested" &&
-            (task.assigneeId === null ||
-              task.assigneeId === current.selfId ||
-              (task.authorId === current.selfId && task.contractAwaiting === "author")),
+            task.authorId === current.selfId ||
+            task.assigneeId === current.selfId ||
+            (task.status === "suggested" && task.assigneeId === null),
         ),
       };
     }),
@@ -116,6 +115,34 @@ export const TeamHubHandlersLive = TeamHubToolkit.toLayer({
       const hub = yield* TeamHubService.TeamHubService;
       yield* snapshot(caller.projectId);
       yield* hub.publish({ type: "set_domains", domains }).pipe(Effect.mapError(unavailable));
+      return { sent: true };
+    }),
+  team_complete_task: ({ taskId, result }) =>
+    Effect.gen(function* () {
+      const { caller } = yield* readMutationCaller();
+      const delegation = yield* TeamHubDelegationService.TeamHubDelegationService;
+      yield* delegation
+        .completeTask({ projectId: caller.projectId, threadId: caller.id, taskId, result })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new OrchestratorMcpFailure({ code: "invalid_request", message: error.message }),
+          ),
+        );
+      return { sent: true };
+    }),
+  team_reopen_task: ({ taskId }) =>
+    Effect.gen(function* () {
+      const { caller } = yield* readMutationCaller();
+      const delegation = yield* TeamHubDelegationService.TeamHubDelegationService;
+      yield* delegation
+        .reopenTask({ projectId: caller.projectId, taskId })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new OrchestratorMcpFailure({ code: "invalid_request", message: error.message }),
+          ),
+        );
       return { sent: true };
     }),
   claim_files: ({ paths, action }) =>

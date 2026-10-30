@@ -7,6 +7,7 @@ import type {
   TeamHubJoinInput,
   TeamHubState,
 } from "@t3tools/contracts/teamHub";
+import type { ThreadId } from "@t3tools/contracts";
 import {
   TEAM_HUB_PROTOCOL_VERSION,
   TeamHubSnapshot as TeamHubSnapshotSchema,
@@ -52,6 +53,7 @@ export class TeamHubService extends Context.Service<
     readonly leave: Effect.Effect<void, TeamHubError>;
     readonly publish: (message: TeamHubClientMessage) => Effect.Effect<void, TeamHubError>;
     readonly publishCheckpoint: (input: {
+      readonly threadId: ThreadId;
       readonly repository: string;
       readonly branch: string;
       readonly files: ReadonlyArray<string>;
@@ -67,9 +69,20 @@ export class TeamHubService extends Context.Service<
     readonly revokeInvite: (inviteId: string) => Effect.Effect<void, TeamHubError>;
     readonly updateRepo: (repo: string) => Effect.Effect<void, TeamHubError>;
     readonly removeMember: (memberId: string) => Effect.Effect<void, TeamHubError>;
+    readonly reserveAutoStart: (
+      taskId: string,
+      token: string,
+      sha: string,
+    ) => Effect.Effect<{ reserved: boolean }, TeamHubError>;
+    readonly releaseAutoStart: (
+      taskId: string,
+      token: string,
+    ) => Effect.Effect<unknown, TeamHubError>;
     readonly decideTask: (
       taskId: string,
       decision: "accepted" | "dismissed",
+      threadId?: ThreadId,
+      autoStartToken?: string,
     ) => Effect.Effect<void, TeamHubError>;
   }
 >()("t3/teamHub/TeamHubService") {}
@@ -339,9 +352,16 @@ const make = Effect.gen(function* () {
         )
           return;
         const files = input.files.filter((path) => path.length <= 256).slice(0, 200);
+        const task = state.snapshot.tasks.find(
+          (task) =>
+            task.threadId === input.threadId &&
+            task.assigneeId === state.snapshot?.selfId &&
+            (task.status === "accepted" || task.status === "done"),
+        );
         socket.send(
           JSON.stringify({
             type: "publish_summary",
+            ...(task ? { taskId: task.id } : {}),
             branch: input.branch.slice(0, 256),
             files,
             description: input.description.slice(0, 1000),
@@ -371,7 +391,12 @@ const make = Effect.gen(function* () {
     revokeInvite: (inviteId) => request("/api/invites/revoke", { inviteId }),
     updateRepo: (repo) => request("/api/team/repo", { repo }),
     removeMember: (memberId) => request("/api/members/remove", { memberId }),
-    decideTask: (taskId, decision) => request("/api/tasks/decide", { taskId, decision }),
+    reserveAutoStart: (taskId, token, sha) =>
+      request("/api/tasks/auto-start", { taskId, token, sha }),
+    releaseAutoStart: (taskId, token) =>
+      request("/api/tasks/auto-start-release", { taskId, token }),
+    decideTask: (taskId, decision, threadId, autoStartToken) =>
+      request("/api/tasks/decide", { taskId, decision, threadId, autoStartToken }),
   });
 });
 

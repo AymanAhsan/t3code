@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { HubStore } from "./store.ts";
+import { ThreadId } from "@t3tools/contracts";
 
 const dirs: string[] = [];
 const open = () => {
@@ -18,6 +19,77 @@ afterEach(() => {
 });
 
 describe("team hub store", () => {
+  it("links accepted threads and progress, persists completion, and supports reopening and completing again", () => {
+    const { dir, store } = open();
+    const admin = store.bootstrap(store.setupToken!, "Team", "repo", "Alice");
+    const alice = store.authenticate(admin.credential);
+    const bob = store.authenticate(
+      store.join(store.createInvite(alice, alice.team_id).token, "Bob").credential,
+    );
+    const eve = store.authenticate(
+      store.join(store.createInvite(alice, alice.team_id).token, "Eve").credential,
+    );
+    store.publish(alice, {
+      type: "post_task",
+      assigneeId: null,
+      text: "Build API",
+      contract: null,
+    });
+    const taskId = store.snapshot(alice, new Set()).tasks[0]!.id;
+    const result = {
+      branch: "work/api",
+      sha: "a".repeat(40),
+      description: "Built API; contract tests passed",
+    };
+    const complete = { type: "complete_task" as const, taskId, result };
+    expect(() => store.publish(bob, complete)).toThrow();
+    const threadId = ThreadId.make("bob-thread");
+    store.decideTask(bob, taskId, "accepted", threadId);
+    expect(store.snapshot(alice, new Set()).tasks[0]).toMatchObject({
+      assigneeId: bob.id,
+      threadId,
+      contractAwaiting: null,
+    });
+    expect(() => store.publish(alice, complete)).toThrow("assignee");
+    expect(() => store.publish(eve, complete)).toThrow("assignee");
+    store.publish(bob, {
+      type: "publish_summary",
+      taskId,
+      branch: result.branch,
+      files: ["api.ts"],
+      description: "Progress",
+    });
+    expect(store.snapshot(alice, new Set()).tasks[0]?.status).toBe("accepted");
+    expect(store.snapshot(alice, new Set()).summaries[0]?.taskId).toBe(taskId);
+    store.publish(bob, complete);
+    expect(() => store.publish(bob, complete)).toThrow("accepted");
+    store.close();
+    const reopened = new HubStore(dir);
+    try {
+      expect(reopened.snapshot(alice, new Set()).tasks[0]).toMatchObject({
+        status: "done",
+        result,
+        threadId,
+      });
+      expect(reopened.snapshot(alice, new Set()).summaries).toHaveLength(2);
+      expect(() => reopened.publish(eve, { type: "reopen_task", taskId })).toThrow(
+        "author or assignee",
+      );
+      reopened.publish(alice, { type: "reopen_task", taskId });
+      expect(reopened.snapshot(alice, new Set()).tasks[0]).toMatchObject({
+        status: "accepted",
+        result: null,
+        threadId,
+      });
+      expect(() => reopened.publish(alice, { type: "reopen_task", taskId })).toThrow("completed");
+      reopened.publish(bob, complete);
+      reopened.publish(bob, { type: "reopen_task", taskId });
+      expect(reopened.snapshot(alice, new Set()).tasks[0]?.status).toBe("accepted");
+    } finally {
+      reopened.close();
+    }
+  });
+
   it("bootstraps once and preserves the setup link across an interrupted first start", () => {
     const { dir, store } = open();
     const token = store.setupToken;
@@ -143,10 +215,16 @@ describe("team hub store", () => {
     const admin = store.bootstrap(store.setupToken!, "Engineering", "repo", "Alice");
     const alice = store.authenticate(admin.credential);
     store.publish(alice, { type: "post_task", assigneeId: null, text: "Old task", contract: null });
+    store.publish(alice, {
+      type: "publish_summary",
+      branch: "main",
+      files: [],
+      description: "Old summary",
+    });
     store.close();
     const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "hub.sqlite"));
     db.exec(
-      "ALTER TABLE members DROP COLUMN domains_json; ALTER TABLE tasks DROP COLUMN contract_json; ALTER TABLE tasks DROP COLUMN contract_awaiting;",
+      "ALTER TABLE members DROP COLUMN domains_json; ALTER TABLE tasks DROP COLUMN contract_json; ALTER TABLE tasks DROP COLUMN contract_awaiting; ALTER TABLE tasks DROP COLUMN thread_id; ALTER TABLE tasks DROP COLUMN result_json; ALTER TABLE summaries DROP COLUMN task_id;",
     );
     db.close();
     const migrated = new HubStore(dir);
@@ -157,7 +235,10 @@ describe("team hub store", () => {
         text: "Old task",
         contract: null,
         contractAwaiting: null,
+        threadId: null,
+        result: null,
       });
+      expect(snapshot.summaries[0]).toMatchObject({ description: "Old summary", taskId: null });
     } finally {
       migrated.close();
     }
@@ -202,6 +283,146 @@ describe("team hub store", () => {
     expect(() =>
       store.publish(alice, { type: "revise_contract", taskId: task().id, sha: "c".repeat(40) }),
     ).toThrow(/unavailable/);
+    store.close();
+  });
+});
+
+describe("automatic team task allowances", () => {
+  const setup = () => {
+    const { dir, store } = open();
+    const alice = store.authenticate(
+      store.bootstrap(store.setupToken!, "Team", "repo", "Alice").credential,
+    );
+    const bob = store.authenticate(
+      store.join(store.createInvite(alice, alice.team_id).token, "Bob").credential,
+    );
+    store.publish(bob, { type: "set_domains", domains: ["api/**"] });
+    const arm = (remainingStarts = 3) =>
+      store.publish(bob, {
+        type: "set_auto_accept",
+        policy: { trustedAuthorIds: [alice.id], remainingStarts },
+      });
+    const post = (path: string | null = "api/auth.yaml") => {
+      store.publish(alice, {
+        type: "post_task",
+        assigneeId: bob.id,
+        text: "Build API",
+        contract: path === null ? null : { path, branch: "contract/api", sha: "a".repeat(40) },
+      });
+      return store.snapshot(bob, new Set()).tasks.find((t) => !ids.has(t.id))!.id;
+    };
+    const ids = new Set<string>();
+    const task = (path?: string | null) => {
+      const id = post(path);
+      ids.add(id);
+      return id;
+    };
+    return { dir, store, alice, bob, arm, task };
+  };
+
+  it("defaults off and only reserves trusted assigned contract work in owned areas", () => {
+    const { store, alice, bob, arm, task } = setup();
+    const valid = task();
+    expect(store.reserveAutoStart(bob, valid, "off", "a".repeat(40))).toBe(false);
+    arm();
+    expect(store.reserveAutoStart(bob, task(null), "note", "a".repeat(40))).toBe(false);
+    expect(store.reserveAutoStart(bob, task("web/ui.yaml"), "outside", "a".repeat(40))).toBe(false);
+    expect(
+      store.reserveAutoStart(bob, task("api/../private.yaml"), "traversal", "a".repeat(40)),
+    ).toBe(false);
+    store.publish(bob, {
+      type: "set_auto_accept",
+      policy: { trustedAuthorIds: [], remainingStarts: 3 },
+    });
+    expect(store.reserveAutoStart(bob, valid, "untrusted", "a".repeat(40))).toBe(false);
+    arm();
+    store.publish(bob, { type: "revise_contract", taskId: valid, sha: "b".repeat(40) });
+    expect(store.reserveAutoStart(bob, valid, "pending", "a".repeat(40))).toBe(false);
+    store.publish(alice, { type: "agree_contract", taskId: valid, sha: "b".repeat(40) });
+    expect(store.reserveAutoStart(bob, valid, "stale", "a".repeat(40))).toBe(false);
+    expect(store.reserveAutoStart(bob, valid, "agreed", "b".repeat(40))).toBe(true);
+    expect(() =>
+      store.publish(alice, { type: "revise_contract", taskId: valid, sha: "c".repeat(40) }),
+    ).toThrow("starting automatically");
+    store.close();
+  });
+
+  it("persists spent attempts, prevents duplicate starts, and shares one active slot across connections", () => {
+    const { dir, store, bob, arm, task } = setup();
+    arm(2);
+    const first = task(),
+      second = task(),
+      third = task();
+    expect(store.reserveAutoStart(bob, first, "first", "a".repeat(40))).toBe(true);
+    expect(store.reserveAutoStart(bob, first, "duplicate", "a".repeat(40))).toBe(false);
+    expect(store.reserveAutoStart(bob, second, "busy", "a".repeat(40))).toBe(false);
+    expect(() => store.decideTask(bob, first, "accepted", ThreadId.make("manual"))).toThrow();
+    expect(store.releaseAutoStart(bob, first, "wrong-token")).toBe(false);
+    expect(store.releaseAutoStart(bob, first, "first")).toBe(true);
+    expect(store.reserveAutoStart(bob, first, "retry", "a".repeat(40))).toBe(false);
+    expect(store.reserveAutoStart(bob, second, "second", "a".repeat(40))).toBe(true);
+    store.decideTask(bob, second, "accepted", ThreadId.make("auto-thread"), "second");
+    expect(store.reserveAutoStart(bob, third, "exhausted", "a".repeat(40))).toBe(false);
+    store.close();
+    const reopened = new HubStore(dir);
+    expect(
+      reopened.snapshot(bob, new Set()).members.find((m) => m.id === bob.id)?.autoAccept
+        ?.remainingStarts,
+    ).toBe(0);
+    expect(reopened.reserveAutoStart(bob, first, "restart", "a".repeat(40))).toBe(false);
+    reopened.close();
+  });
+
+  it("holds the active slot until completion even while unused allowance remains", () => {
+    const { store, bob, arm, task } = setup();
+    arm();
+    const first = task(),
+      second = task();
+    expect(store.reserveAutoStart(bob, first, "first", "a".repeat(40))).toBe(true);
+    store.decideTask(bob, first, "accepted", ThreadId.make("auto-thread"), "first");
+    expect(store.snapshot(bob, new Set()).tasks.find((t) => t.id === first)?.autoStarted).toBe(
+      true,
+    );
+    expect(store.reserveAutoStart(bob, second, "busy", "a".repeat(40))).toBe(false);
+    store.publish(bob, {
+      type: "complete_task",
+      taskId: first,
+      result: { branch: "work/api", sha: "b".repeat(40), description: "Ready" },
+    });
+    expect(store.reserveAutoStart(bob, second, "next", "a".repeat(40))).toBe(true);
+    store.close();
+  });
+
+  it("does not refill on completion and clears opt-in when the repository changes", () => {
+    const { store, alice, bob, arm, task } = setup();
+    arm(1);
+    const first = task(),
+      second = task();
+    expect(store.reserveAutoStart(bob, first, "first", "a".repeat(40))).toBe(true);
+    store.decideTask(bob, first, "accepted", ThreadId.make("auto-thread"), "first");
+    store.publish(bob, {
+      type: "complete_task",
+      taskId: first,
+      result: { branch: "work/api", sha: "b".repeat(40), description: "Ready" },
+    });
+    expect(store.reserveAutoStart(bob, second, "loop", "a".repeat(40))).toBe(false);
+    arm();
+    store.updateRepo(alice, "another-repo");
+    expect(store.reserveAutoStart(bob, second, "new-repo", "a".repeat(40))).toBe(false);
+    store.close();
+  });
+
+  it("lets a member dismiss a stranded reservation and turn off future starts", () => {
+    const { store, bob, arm, task } = setup();
+    arm();
+    const first = task(),
+      second = task();
+    expect(store.reserveAutoStart(bob, first, "stranded", "a".repeat(40))).toBe(true);
+    store.decideTask(bob, first, "dismissed");
+    expect(store.reserveAutoStart(bob, second, "next", "a".repeat(40))).toBe(true);
+    store.releaseAutoStart(bob, second, "next");
+    arm(0);
+    expect(store.reserveAutoStart(bob, task(), "disabled", "a".repeat(40))).toBe(false);
     store.close();
   });
 });

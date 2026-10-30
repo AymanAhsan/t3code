@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 import type {
   TeamHubActivity,
+  TeamHubAutoAccept,
   TeamHubClaim,
   TeamHubClientMessage,
   TeamHubContractChange,
@@ -15,16 +16,20 @@ import type {
   TeamHubSnapshot,
   TeamHubSummary,
   TeamHubTask,
+  TeamHubTaskResult,
 } from "@t3tools/contracts/teamHub";
+import { matchesDomain } from "@t3tools/contracts/teamHub";
+import type { ThreadId } from "@t3tools/contracts";
 
 const IDLE_ACTIVITY: TeamHubActivity = { provider: null, working: false };
 
 type TeamRow = { id: string; name: string; repo: string };
 type MemberRow = { id: string; team_id: string; name: string; role: "admin" | "member" };
-type MemberListRow = MemberRow & { domains_json: string };
+type MemberListRow = MemberRow & { domains_json: string; auto_accept_json: string };
 type SummaryRow = {
   id: string;
   member_id: string;
+  task_id: string | null;
   branch: string;
   files_json: string;
   description: string;
@@ -35,7 +40,12 @@ type TaskRow = {
   author_id: string;
   assignee_id: string | null;
   text: string;
-  status: "suggested" | "accepted" | "dismissed";
+  status: TeamHubTask["status"];
+  thread_id: ThreadId | null;
+  result_json: string | null;
+  auto_start_attempted: number;
+  auto_start_token: string | null;
+  auto_started: number;
   contract_json: string | null;
   contract_awaiting: TeamHubContractParty | null;
   created_at: number;
@@ -115,9 +125,16 @@ export class HubStore {
       CREATE INDEX IF NOT EXISTS contracts_team ON contract_changes(team_id, created_at DESC);
     `);
     // Columns added after the first release. Older hub databases gain them on startup.
+    this.addColumnIfMissing("members", "auto_accept_json", "TEXT NOT NULL DEFAULT '{}'");
+    this.addColumnIfMissing("tasks", "auto_started", "INTEGER NOT NULL DEFAULT 0");
+    this.addColumnIfMissing("tasks", "auto_start_token", "TEXT");
+    this.addColumnIfMissing("tasks", "auto_start_attempted", "INTEGER NOT NULL DEFAULT 0");
     this.addColumnIfMissing("members", "domains_json", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumnIfMissing("tasks", "contract_json", "TEXT");
     this.addColumnIfMissing("tasks", "contract_awaiting", "TEXT");
+    this.addColumnIfMissing("tasks", "thread_id", "TEXT");
+    this.addColumnIfMissing("tasks", "result_json", "TEXT");
+    this.addColumnIfMissing("summaries", "task_id", "TEXT");
     const storedKey = this.db.prepare("SELECT value FROM meta WHERE key='signing_key'").get() as
       | { value: string }
       | undefined;
@@ -291,6 +308,7 @@ export class HubStore {
     const trimmed = repo.trim();
     if (!trimmed || trimmed.length > 256) throw new HubError("Invalid repository", 400);
     this.db.prepare("UPDATE teams SET repo=? WHERE id=?").run(trimmed, admin.team_id);
+    this.db.prepare("UPDATE members SET auto_accept_json='{}' WHERE team_id=?").run(admin.team_id);
   }
 
   removeMember(admin: MemberRow, teamId: string, memberId: string) {
@@ -309,6 +327,19 @@ export class HubStore {
     }
   }
 
+  private memberAutoAccept(
+    row: MemberListRow,
+    members: ReadonlyArray<MemberListRow>,
+  ): TeamHubAutoAccept {
+    const saved = JSON.parse(row.auto_accept_json) as Partial<TeamHubAutoAccept>;
+    return {
+      remainingStarts: saved.remainingStarts ?? 0,
+      trustedAuthorIds: (saved.trustedAuthorIds ?? []).filter(
+        (id) => id !== row.id && members.some((member) => member.id === id),
+      ),
+    };
+  }
+
   /** `onlineIds` and `activity` are live presence the server holds in memory, keyed by member. */
   snapshot(
     member: MemberRow,
@@ -320,18 +351,16 @@ export class HubStore {
       .get(member.team_id) as TeamRow;
     const members = this.db
       .prepare(
-        "SELECT id,team_id,name,role,domains_json FROM members WHERE team_id=? AND revoked_at IS NULL",
+        "SELECT id,team_id,name,role,domains_json,auto_accept_json FROM members WHERE team_id=? AND revoked_at IS NULL",
       )
       .all(member.team_id) as MemberListRow[];
     const summaries = this.db
       .prepare(
-        "SELECT id,member_id,branch,files_json,description,created_at FROM summaries WHERE team_id=? ORDER BY created_at DESC LIMIT 50",
+        "SELECT id,member_id,task_id,branch,files_json,description,created_at FROM summaries WHERE team_id=? ORDER BY created_at DESC LIMIT 50",
       )
       .all(member.team_id) as SummaryRow[];
     const tasks = this.db
-      .prepare(
-        "SELECT id,author_id,assignee_id,text,status,contract_json,contract_awaiting,created_at FROM tasks WHERE team_id=? ORDER BY created_at DESC LIMIT 100",
-      )
+      .prepare("SELECT * FROM tasks WHERE team_id=? ORDER BY created_at DESC LIMIT 100")
       .all(member.team_id) as TaskRow[];
     const notes = this.db
       .prepare(
@@ -358,10 +387,12 @@ export class HubStore {
         online: onlineIds.has(row.id),
         domains: JSON.parse(row.domains_json) as string[],
         activity: activity.get(row.id) ?? IDLE_ACTIVITY,
+        autoAccept: this.memberAutoAccept(row, members),
       })),
       summaries: summaries.map((row): TeamHubSummary => ({
         id: row.id,
         memberId: row.member_id,
+        taskId: row.task_id,
         branch: row.branch,
         files: JSON.parse(row.files_json) as string[],
         description: row.description,
@@ -373,6 +404,11 @@ export class HubStore {
         assigneeId: row.assignee_id,
         text: row.text,
         status: row.status,
+        threadId: row.thread_id,
+        autoStartAttempted: row.auto_start_attempted === 1,
+        autoStarted: row.auto_started === 1,
+        result:
+          row.result_json === null ? null : (JSON.parse(row.result_json) as TeamHubTaskResult),
         contract:
           row.contract_json === null ? null : (JSON.parse(row.contract_json) as TeamHubContractRef),
         contractAwaiting: row.contract_awaiting,
@@ -404,8 +440,11 @@ export class HubStore {
     const id = NodeCrypto.randomUUID();
     switch (message.type) {
       case "publish_summary":
+        if (message.taskId !== undefined) this.assignedTask(member, message.taskId);
         this.db
-          .prepare("INSERT INTO summaries VALUES (?,?,?,?,?,?,?)")
+          .prepare(
+            "INSERT INTO summaries (id,team_id,member_id,branch,files_json,description,created_at,task_id) VALUES (?,?,?,?,?,?,?,?)",
+          )
           .run(
             id,
             member.team_id,
@@ -414,8 +453,52 @@ export class HubStore {
             JSON.stringify(message.files),
             message.description,
             createdAt,
+            message.taskId ?? null,
           );
         break;
+      case "complete_task": {
+        const task = this.assignedTask(member, message.taskId);
+        if (task.status !== "accepted")
+          throw new HubError("Only accepted tasks can be completed", 409);
+        this.db.exec("BEGIN IMMEDIATE");
+        try {
+          this.db
+            .prepare("UPDATE tasks SET status='done',result_json=? WHERE id=?")
+            .run(JSON.stringify(message.result), task.id);
+          this.db
+            .prepare(
+              "INSERT INTO summaries (id,team_id,member_id,branch,files_json,description,created_at,task_id) VALUES (?,?,?,?,?,?,?,?)",
+            )
+            .run(
+              id,
+              member.team_id,
+              member.id,
+              message.result.branch,
+              "[]",
+              message.result.description,
+              createdAt,
+              task.id,
+            );
+          this.db.exec("COMMIT");
+        } catch (error) {
+          this.db.exec("ROLLBACK");
+          throw error;
+        }
+        break;
+      }
+      case "reopen_task": {
+        const task = this.db
+          .prepare("SELECT * FROM tasks WHERE id=? AND team_id=?")
+          .get(message.taskId, member.team_id) as TaskRow | undefined;
+        if (!task) throw new HubError("Task unavailable", 404);
+        if (task.author_id !== member.id && task.assignee_id !== member.id)
+          throw new HubError("Only the task's author or assignee can reopen it", 403);
+        if (task.status !== "done") throw new HubError("Only completed tasks can be reopened", 409);
+        this.db
+          .prepare("UPDATE tasks SET status='accepted',result_json=NULL WHERE id=?")
+          .run(task.id);
+        break;
+      }
       case "post_task":
         if (
           message.assigneeId &&
@@ -488,6 +571,19 @@ export class HubStore {
             createdAt,
           );
         break;
+      case "set_auto_accept": {
+        const members = this.snapshot(member, new Set()).members;
+        if (
+          message.policy.trustedAuthorIds.some(
+            (id) => id === member.id || !members.some((m) => m.id === id),
+          )
+        )
+          throw new HubError("Choose current teammates to trust", 400);
+        this.db
+          .prepare("UPDATE members SET auto_accept_json=? WHERE id=?")
+          .run(JSON.stringify(message.policy), member.id);
+        break;
+      }
       case "set_domains":
         this.db
           .prepare("UPDATE members SET domains_json=? WHERE id=? AND team_id=?")
@@ -527,23 +623,118 @@ export class HubStore {
     }
   }
 
+  private assignedTask(member: MemberRow, taskId: string) {
+    const task = this.db
+      .prepare("SELECT * FROM tasks WHERE id=? AND team_id=?")
+      .get(taskId, member.team_id) as TaskRow | undefined;
+    if (!task) throw new HubError("Task unavailable", 404);
+    if (task.assignee_id !== member.id)
+      throw new HubError("Only the task's assignee can report work", 403);
+    if (task.status !== "accepted" && task.status !== "done")
+      throw new HubError("Task has not been accepted", 409);
+    return task;
+  }
+
   /** A suggested contract task and which side `member` is on. Only the two sides may review it. */
   private contractTask(member: MemberRow, taskId: string) {
     const task = this.db
-      .prepare(
-        "SELECT id,author_id,assignee_id,text,status,contract_json,contract_awaiting,created_at FROM tasks WHERE id=? AND team_id=?",
-      )
+      .prepare("SELECT * FROM tasks WHERE id=? AND team_id=?")
       .get(taskId, member.team_id) as TaskRow | undefined;
     if (!task || task.status !== "suggested" || task.contract_json === null) {
       throw new HubError("Task unavailable", 404);
     }
+    if (task.auto_start_token !== null)
+      throw new HubError("The contract is starting automatically; dismiss the task to cancel", 409);
     const party: TeamHubContractParty | null =
       task.author_id === member.id ? "author" : task.assignee_id === member.id ? "assignee" : null;
     if (party === null) throw new HubError("Only the task's author or assignee can review it", 403);
     return { task, party, contract: JSON.parse(task.contract_json) as TeamHubContractRef };
   }
 
-  decideTask(member: MemberRow, taskId: string, decision: "accepted" | "dismissed") {
+  /** Reserve before launch; failures spend allowance too and are never retried automatically. */
+  reserveAutoStart(member: MemberRow, taskId: string, token: string, sha: string): boolean {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const reserved = this.reserveAutoStartInTransaction(member, taskId, token, sha);
+      this.db.exec("COMMIT");
+      return reserved;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private reserveAutoStartInTransaction(
+    member: MemberRow,
+    taskId: string,
+    token: string,
+    sha: string,
+  ): boolean {
+    const snapshot = this.snapshot(member, new Set());
+    const self = snapshot.members.find((m) => m.id === member.id)!;
+    const policy = self.autoAccept;
+    const task = snapshot.tasks.find((t) => t.id === taskId);
+    if (
+      !policy ||
+      policy.remainingStarts <= 0 ||
+      !task ||
+      task.status !== "suggested" ||
+      task.assigneeId !== member.id ||
+      task.authorId === member.id ||
+      !policy.trustedAuthorIds.includes(task.authorId) ||
+      !snapshot.members.some((m) => m.id === task.authorId) ||
+      !task.contract ||
+      task.contract.path.startsWith("/") ||
+      task.contract.path.includes("\\") ||
+      task.contract.path.split("/").includes("..") ||
+      task.contract.sha !== sha ||
+      task.contractAwaiting === "author" ||
+      task.autoStartAttempted ||
+      !self.domains.some((glob) => matchesDomain(task.contract!.path, glob)) ||
+      this.db
+        .prepare(
+          "SELECT 1 FROM tasks WHERE team_id=? AND assignee_id=? AND (auto_start_token IS NOT NULL OR (status='accepted' AND auto_started=1))",
+        )
+        .get(member.team_id, member.id)
+    )
+      return false;
+    this.db
+      .prepare("UPDATE tasks SET auto_start_attempted=1,auto_start_token=? WHERE id=?")
+      .run(token, taskId);
+    this.db
+      .prepare("UPDATE members SET auto_accept_json=? WHERE id=?")
+      .run(JSON.stringify({ ...policy, remainingStarts: policy.remainingStarts - 1 }), member.id);
+    return true;
+  }
+
+  releaseAutoStart(member: MemberRow, taskId: string, token: string) {
+    return (
+      this.db
+        .prepare(
+          "UPDATE tasks SET auto_start_token=NULL WHERE id=? AND team_id=? AND assignee_id=? AND auto_start_token=?",
+        )
+        .run(taskId, member.team_id, member.id, token).changes > 0
+    );
+  }
+
+  decideTask(
+    member: MemberRow,
+    taskId: string,
+    decision: "accepted" | "dismissed",
+    threadId: ThreadId | null = null,
+    autoStartToken: string | null = null,
+  ) {
+    const claim = this.db
+      .prepare("SELECT auto_start_token FROM tasks WHERE id=? AND team_id=?")
+      .get(taskId, member.team_id) as { auto_start_token: string | null } | undefined;
+    if (
+      decision === "accepted" &&
+      ((autoStartToken !== null && claim?.auto_start_token !== autoStartToken) ||
+        (claim?.auto_start_token !== null &&
+          claim?.auto_start_token !== undefined &&
+          claim.auto_start_token !== autoStartToken))
+    )
+      throw new HubError("This task is starting automatically. Dismiss it to cancel.", 409);
     if (decision === "accepted") {
       const awaiting = this.db
         .prepare("SELECT contract_awaiting FROM tasks WHERE id=? AND team_id=?")
@@ -554,9 +745,21 @@ export class HubStore {
     }
     const result = this.db
       .prepare(
-        "UPDATE tasks SET status=? WHERE id=? AND team_id=? AND status='suggested' AND (assignee_id IS NULL OR assignee_id=?)",
+        "UPDATE tasks SET status=?,assignee_id=?,thread_id=?,contract_awaiting=NULL,auto_start_token=NULL,auto_started=? WHERE id=? AND team_id=? AND status='suggested' AND (assignee_id IS NULL OR assignee_id=?)",
       )
-      .run(decision, taskId, member.team_id, member.id);
+      .run(
+        decision,
+        member.id,
+        decision === "accepted" ? threadId : null,
+        decision === "accepted" &&
+          autoStartToken !== null &&
+          claim?.auto_start_token === autoStartToken
+          ? 1
+          : 0,
+        taskId,
+        member.team_id,
+        member.id,
+      );
     if (!result.changes) throw new HubError("Task unavailable", 404);
   }
 }

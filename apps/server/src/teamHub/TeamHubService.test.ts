@@ -9,6 +9,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import type { TeamHubState } from "@t3tools/contracts/teamHub";
+import { ThreadId } from "@t3tools/contracts";
 import { createHubServer } from "../../../hub/src/server.ts";
 import { HubStore } from "../../../hub/src/store.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -96,6 +97,57 @@ describe("local team hub connector", () => {
             (state) => state.snapshot?.tasks[0]?.status === "dismissed",
           );
           expect(dismissed.snapshot?.tasks[0]?.id).toBe(task.id);
+          yield* hub.publish({
+            type: "post_task",
+            assigneeId: member.id,
+            text: "Build API",
+            contract: null,
+          });
+          const offered = yield* nextState(
+            (state) => state.snapshot?.tasks.some((task) => task.text === "Build API") === true,
+          );
+          const workTask = offered.snapshot!.tasks.find((task) => task.text === "Build API")!;
+          const threadId = ThreadId.make("delegated-thread");
+          yield* hub.decideTask(workTask.id, "accepted", threadId);
+          yield* nextState(
+            (state) => state.snapshot?.tasks.some((task) => task.threadId === threadId) === true,
+          );
+          yield* hub.publishCheckpoint({
+            threadId,
+            repository: "github.com/example/repo",
+            branch: "work/api",
+            files: ["src/service.ts"],
+            description: "API progress",
+          });
+          const progress = yield* nextState(
+            (state) =>
+              state.snapshot?.summaries.some((summary) => summary.taskId === workTask.id) === true,
+          );
+          expect(progress.snapshot?.tasks.find((task) => task.id === workTask.id)?.status).toBe(
+            "accepted",
+          );
+          const result = {
+            branch: "work/api",
+            sha: "a".repeat(40),
+            description: "API complete; tests passed",
+          };
+          yield* hub.publish({ type: "complete_task", taskId: workTask.id, result });
+          const completed = yield* nextState(
+            (state) => state.snapshot?.tasks.some((task) => task.status === "done") === true,
+          );
+          expect(completed.snapshot?.tasks.find((task) => task.id === workTask.id)?.result).toEqual(
+            result,
+          );
+          yield* hub.publish({ type: "reopen_task", taskId: workTask.id });
+          const reopened = yield* nextState(
+            (state) =>
+              state.snapshot?.tasks.some(
+                (task) => task.id === workTask.id && task.status === "accepted",
+              ) === true,
+          );
+          expect(
+            reopened.snapshot?.tasks.find((task) => task.id === workTask.id)?.result,
+          ).toBeNull();
           yield* hub.publish({ type: "post_note", text: "Ready to pair" });
           expect(store.snapshot(member, new Set()).notes[0]?.text).toBe("Ready to pair");
           const invite = store.createInvite(member, store.snapshot(member, new Set()).team.id);

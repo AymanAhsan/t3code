@@ -64,7 +64,11 @@ export const teamHubHttpApiLayer = HttpApiBuilder.group(
       .handle(
         "publish",
         Effect.fn("teamHub.publish")(function* ({ payload }) {
-          yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+          yield* requireEnvironmentScope(
+            payload.type === "set_auto_accept"
+              ? AuthAccessWriteScope
+              : AuthOrchestrationOperateScope,
+          );
           yield* hub
             .publish(payload)
             .pipe(Effect.catch((cause) => failEnvironmentInternal("internal_error", cause)));

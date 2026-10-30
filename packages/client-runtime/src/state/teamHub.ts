@@ -60,6 +60,17 @@ export function incomingTeamHubTasks(
   ).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
+/** Work in progress and completed handoffs for either side of a task. */
+export function delegatedTeamHubTasks(snapshot: TeamHubSnapshot | null) {
+  return (
+    snapshot?.tasks.filter(
+      (task) =>
+        (task.status === "accepted" || task.status === "done") &&
+        (task.authorId === snapshot.selfId || task.assigneeId === snapshot.selfId),
+    ) ?? []
+  );
+}
+
 /** Turns the comma- or newline-separated "Your areas" text into domain globs. */
 export function parseTeamHubDomains(text: string): string[] {
   const domains = text

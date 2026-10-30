@@ -16,6 +16,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import * as Semaphore from "effect/Semaphore";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -63,6 +65,7 @@ export class TeamHubTaskDecisionError extends Schema.TaggedError<TeamHubTaskDeci
 export class TeamHubTaskDecisionService extends Context.Service<
   TeamHubTaskDecisionService,
   {
+    readonly startAutomaticTasks: Effect.Effect<void>;
     readonly decideTask: (
       taskId: string,
       decision: "accepted" | "dismissed",
@@ -73,6 +76,11 @@ export class TeamHubTaskDecisionService extends Context.Service<
 /** The first message of an accepted task's thread. A contract pins the agent to the agreed file. */
 export function taskPrompt(task: TeamHubTask, author: string): string {
   const lines = [task.text, "", `Suggested by ${author}.`];
+  lines.push(
+    "",
+    `Team task: ${task.id}.`,
+    "When the requested work is ready, run the relevant checks, commit and push it, then call team_complete_task with this task id, branch, full commit sha, and a short summary including the checks you ran. Ending a turn alone does not complete the task.",
+  );
   const contract = task.contract;
   if (contract !== null) {
     lines.push(
@@ -92,6 +100,7 @@ const make = Effect.gen(function* () {
   const launch = yield* ThreadLaunch.ThreadLaunchService;
   const settings = yield* ServerSettings.ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+  const decisionLock = yield* Semaphore.make(1);
   const randomUUID = (yield* Crypto.Crypto).randomUUIDv4;
 
   const removeThread = (threadId: ThreadId) =>
@@ -103,9 +112,11 @@ const make = Effect.gen(function* () {
       });
     });
 
-  const decideTask: TeamHubTaskDecisionService["Service"]["decideTask"] = Effect.fn(
-    "TeamHubTaskDecisionService.decideTask",
-  )(function* (taskId, decision) {
+  const decideTask = Effect.fn("TeamHubTaskDecisionService.decideTask")(function* (
+    taskId: string,
+    decision: "accepted" | "dismissed",
+    autoStartToken?: string,
+  ) {
     if (decision === "dismissed") {
       yield* hub
         .decideTask(taskId, decision)
@@ -209,6 +220,14 @@ const make = Effect.gen(function* () {
         ),
       ),
     );
+    if (autoStartToken !== undefined) {
+      const claim = yield* hub
+        .reserveAutoStart(taskId, autoStartToken, task.contract?.sha ?? "")
+        .pipe(
+          Effect.mapError((cause) => new TeamHubTaskDecisionError({ reason: "hub_failed", cause })),
+        );
+      if (!claim.reserved) return { threadId: null };
+    }
     const launchResult = yield* Effect.result(
       launch.launch({
         commandId,
@@ -241,7 +260,9 @@ const make = Effect.gen(function* () {
     }
     const launched = launchResult.success;
 
-    const accepted = yield* Effect.result(hub.decideTask(taskId, "accepted"));
+    const accepted = yield* Effect.result(
+      hub.decideTask(taskId, "accepted", launched.threadId, autoStartToken),
+    );
     if (Result.isFailure(accepted)) {
       yield* removeThread(launched.threadId).pipe(
         Effect.mapError(
@@ -256,7 +277,50 @@ const make = Effect.gen(function* () {
     return { threadId: launched.threadId };
   });
 
-  return TeamHubTaskDecisionService.of({ decideTask });
+  return TeamHubTaskDecisionService.of({
+    decideTask: (taskId, decision) =>
+      decideTask(taskId, decision).pipe(decisionLock.withPermits(1)),
+    startAutomaticTasks: Effect.suspend(() =>
+      hub.stream.pipe(
+        Stream.runForEach((state) =>
+          Effect.gen(function* () {
+            if (state.status !== "connected" || !state.snapshot) return;
+            const snapshot = state.snapshot;
+            const policy = snapshot.members.find((m) => m.id === snapshot.selfId)?.autoAccept;
+            if (!policy || policy.remainingStarts <= 0) return;
+            for (const task of snapshot.tasks.toSorted((a, b) => a.createdAt - b.createdAt)) {
+              if (
+                task.status !== "suggested" ||
+                task.assigneeId !== snapshot.selfId ||
+                task.autoStartAttempted ||
+                !task.contract ||
+                task.contractAwaiting === "author" ||
+                !policy.trustedAuthorIds.includes(task.authorId)
+              )
+                continue;
+              const token = yield* randomUUID.pipe(Effect.orDie);
+              yield* decideTask(task.id, "accepted", token).pipe(
+                decisionLock.withPermits(1),
+                Effect.catch((error) =>
+                  Effect.logWarning("Automatic team task start failed", {
+                    taskId: task.id,
+                    reason: error.reason,
+                  }),
+                ),
+                Effect.ensuring(hub.releaseAutoStart(task.id, token).pipe(Effect.ignore)),
+              );
+            }
+          }),
+        ),
+      ),
+    ),
+  });
 });
 
 export const layer = Layer.effect(TeamHubTaskDecisionService, make);
+export const automaticTasksLayer = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const service = yield* TeamHubTaskDecisionService;
+    yield* service.startAutomaticTasks.pipe(Effect.forkScoped);
+  }),
+);

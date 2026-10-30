@@ -7,6 +7,7 @@ import {
   TeamHubNote,
   TeamHubSummary,
   TeamHubTask,
+  TeamHubTaskResult,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
@@ -32,7 +33,7 @@ const TeamInbox = Tool.make("team_inbox", {
   ...shared,
   description:
     "Read teammates, recent summaries, notes, and suggested tasks for this team's repository. Each teammate's domains are the repository path globs they own. " +
-    "Tasks include ones suggested to you and contract tasks you posted whose contract is waiting on your review (`contractAwaiting` is `author`).",
+    "Tasks include suggestions to you and tasks you posted or accepted, including completed work with its pushed branch and commit. A done task's result is ready to fetch and integrate; a turn ending alone does not mark it done.",
   success: Schema.Struct({
     members: Schema.Array(TeamHubMember),
     summaries: Schema.Array(TeamHubSummary),
@@ -46,7 +47,7 @@ const TeamInbox = Tool.make("team_inbox", {
 const TeamPost = Tool.make("team_post", {
   ...shared,
   description:
-    "Post a short note or suggest a task to a teammate. Tasks require the human recipient to accept them. " +
+    "Post a short note or suggest a task to a teammate. Tasks require recipient acceptance unless that member has enabled a limited automatic-start allowance for you and the contract is inside their areas. " +
     "To delegate work that crosses an interface, such as a backend API for your frontend, first commit the agreed contract file " +
     "(for example an OpenAPI or schema file) to a branch and push it, then pass `contract` with that branch, the file path, and the full commit sha. " +
     "Without assigneeId, a contract task goes to the one teammate whose domains own the contract path. " +
@@ -103,6 +104,22 @@ const ListContractChanges = Tool.make("list_contract_changes", {
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);
 
+const CompleteTask = Tool.make("team_complete_task", {
+  ...shared,
+  description:
+    "Mark the accepted task for this thread done. Run the relevant checks, commit and push the finished work first. Pass the pushed branch, full commit sha, and a short description including validation. The author sees this result in team_inbox and can fetch and integrate it. This reports readiness; it does not merge code or verify tests for you.",
+  parameters: Schema.Struct({ taskId: Schema.String, result: TeamHubTaskResult }),
+  success: Schema.Struct({ sent: Schema.Boolean }),
+}).annotate(Tool.Destructive, false);
+
+const ReopenTask = Tool.make("team_reopen_task", {
+  ...shared,
+  description:
+    "Reopen a completed task you posted or accepted when it needs more work. It returns to accepted in the original thread and clears the completion result. Tell the assignee what remains; reopening does not start an agent turn.",
+  parameters: Schema.Struct({ taskId: Schema.String }),
+  success: Schema.Struct({ sent: Schema.Boolean }),
+}).annotate(Tool.Destructive, false);
+
 export const TeamHubToolkit = Toolkit.make(
   TeamInbox,
   TeamPost,
@@ -110,4 +127,6 @@ export const TeamHubToolkit = Toolkit.make(
   SetDomains,
   ReviewContract,
   ListContractChanges,
+  CompleteTask,
+  ReopenTask,
 );
