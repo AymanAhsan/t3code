@@ -3,7 +3,6 @@ import { DeviceToolVersions } from "../device/DeviceToolVersions";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { ScopedSwitch } from "./ScopedSwitch";
 import { DeviceHostsSettings } from "./DeviceHostsSettings";
-import { TeamHubSettings } from "./TeamHubSettings";
 /**
  * Integrations settings - preferences for surfaces T3 Code embeds rather than
  * owns. Browser is the first section: the defaults a preview tab opens at,
@@ -41,6 +40,7 @@ import {
 } from "@t3tools/contracts";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
 import { MoreVertical, Plus as PlusIcon } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { useCallback, useRef, useState } from "react";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
@@ -1465,7 +1465,17 @@ export function IntegrationsSettingsPanel() {
         )}
       </SettingsSection>
       <DeviceIntegrationSettings />
-      <TeamHubSettings />
+      <SettingsSection id="team-hub" title="Team hub">
+        <SettingsRow
+          title="Team hub has its own page"
+          description="Set up or join a team, list the areas you own, and review incoming tasks."
+          control={
+            <Button size="sm" variant="outline" render={<Link to="/team" />}>
+              Open team hub
+            </Button>
+          }
+        />
+      </SettingsSection>
     </SettingsPageContainer>
   );
 }

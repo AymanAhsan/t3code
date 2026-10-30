@@ -17,7 +17,7 @@ Invite links are built from the address the admin's app saved when the hub was s
 
 ## Choosing an address
 
-If the hub runs on the same computer as your T3 Code server, **Settings → Integrations → Team hub → Set up a hub** can share it over Tailscale for you, publicly with Funnel or privately on your tailnet. Run the hub, then choose Tailscale there. The steps below are for a hub on another machine, or to do the same by hand.
+If the hub runs on the same computer as your T3 Code server, **Team hub → Set up a hub** (sidebar, **Set up a team**) can share it over Tailscale for you, publicly with Funnel or privately on your tailnet. Run the hub, then choose Tailscale there. The steps below are for a hub on another machine, or to do the same by hand.
 
 | Situation                                                | Use                                                                                                                                                      |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -43,7 +43,7 @@ Funnel makes the hub reachable from the public internet. Access is controlled by
 
 ## First team
 
-The container log prints a one-time setup link, using `HUB_PUBLIC_URL` as its address. Open T3 Code's **Settings → Integrations → Team hub → Set up a hub** and paste the link to create the first team. Completing setup removes the link's token from the database, so the hub prints no setup link on later starts.
+The container log prints a one-time setup link, using `HUB_PUBLIC_URL` as its address. In T3 Code, select **Set up a team** in the sidebar and paste the link to create the first team. Completing setup removes the link's token from the database, so the hub prints no setup link on later starts.
 
 Invites expire after 24 hours and admins can revoke them from the Team hub panel.
 

@@ -55,6 +55,7 @@ import {
   FolderPlusIcon,
   MessageSquareDashedIcon,
   LinkIcon,
+  LogInIcon,
   MessageSquareIcon,
   MonitorIcon,
   MoonIcon,
@@ -64,6 +65,8 @@ import {
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
+  UserPlusIcon,
+  UsersIcon,
 } from "lucide-react";
 import {
   useCallback,
@@ -96,6 +99,7 @@ import {
   getThemeCardDefinition,
   ThemePreviewCircle,
 } from "./settings/ThemePreviewCircles";
+import { TEAM_HUB_INVITES_ID } from "./team/teamHubRoute";
 import { readLocalApi } from "../localApi";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { filesystemEnvironment } from "../state/filesystem";
@@ -2242,6 +2246,39 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
+
+  actionItems.push(
+    {
+      kind: "action",
+      value: "action:team-hub",
+      searchTerms: ["team", "hub", "teammates", "members", "areas", "owners", "handoff", "tasks"],
+      title: "Open team hub",
+      icon: <UsersIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({ to: "/team" });
+      },
+    },
+    {
+      kind: "action",
+      value: "action:team-hub-invite",
+      searchTerms: ["invite", "teammate", "team", "add member", "share", "link"],
+      title: "Invite teammate",
+      icon: <UserPlusIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({ to: "/team", hash: TEAM_HUB_INVITES_ID });
+      },
+    },
+    {
+      kind: "action",
+      value: "action:team-hub-join",
+      searchTerms: ["join", "team", "invite link", "hub", "set up team", "create team"],
+      title: "Join team",
+      icon: <LogInIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await navigate({ to: "/team", search: { mode: "join" } });
+      },
+    },
+  );
 
   actionItems.push({
     kind: "action",

@@ -4,6 +4,8 @@ T3 Code is an "agent harness control surface". It enables control of the agents 
 
 Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, and Google Antigravity. If they're set up on your computer, T3 Code can control them.
 
+This fork adds the [Team hub](docs/user/team-hub.md): teammates list the parts of the repo they own, and when an agent finds follow-up work in someone else's area, it hands that teammate a contract and a suggested task they can accept into their own agent thread.
+
 ## "Wait, what are you selling me?"
 
 Nothing. We built T3 Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
