@@ -29,6 +29,7 @@ export class TeamHubTaskDecisionError extends Schema.TaggedError<TeamHubTaskDeci
     reason: Schema.Literals([
       "disconnected",
       "task_unavailable",
+      "contract_pending",
       "project_missing",
       "provider_unavailable",
       "project_lookup_failed",
@@ -47,6 +48,8 @@ export class TeamHubTaskDecisionError extends Schema.TaggedError<TeamHubTaskDeci
         return "Reconnect to the team hub before accepting tasks.";
       case "task_unavailable":
         return "This suggested task is no longer available.";
+      case "contract_pending":
+        return "The revised contract is waiting for the task's author to agree to it.";
       case "provider_unavailable":
         return "Choose a default provider and model before accepting tasks.";
       case "cleanup_failed":
@@ -124,6 +127,9 @@ const make = Effect.gen(function* () {
       (task.assigneeId !== null && task.assigneeId !== snapshot.selfId)
     ) {
       return yield* new TeamHubTaskDecisionError({ reason: "task_unavailable" });
+    }
+    if (task.contractAwaiting === "author") {
+      return yield* new TeamHubTaskDecisionError({ reason: "contract_pending" });
     }
 
     const canonicalKey = normalizeGitRemoteUrl(snapshot.team.repo);

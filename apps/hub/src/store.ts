@@ -7,6 +7,7 @@ import type {
   TeamHubClaim,
   TeamHubClientMessage,
   TeamHubContractChange,
+  TeamHubContractParty,
   TeamHubContractRef,
   TeamHubMember,
   TeamHubNote,
@@ -33,6 +34,7 @@ type TaskRow = {
   text: string;
   status: "suggested" | "accepted" | "dismissed";
   contract_json: string | null;
+  contract_awaiting: TeamHubContractParty | null;
   created_at: number;
 };
 type NoteRow = { id: string; member_id: string; text: string; created_at: number };
@@ -112,6 +114,7 @@ export class HubStore {
     // Columns added after the first release. Older hub databases gain them on startup.
     this.addColumnIfMissing("members", "domains_json", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumnIfMissing("tasks", "contract_json", "TEXT");
+    this.addColumnIfMissing("tasks", "contract_awaiting", "TEXT");
     const storedKey = this.db.prepare("SELECT value FROM meta WHERE key='signing_key'").get() as
       | { value: string }
       | undefined;
@@ -319,7 +322,7 @@ export class HubStore {
       .all(member.team_id) as SummaryRow[];
     const tasks = this.db
       .prepare(
-        "SELECT id,author_id,assignee_id,text,status,contract_json,created_at FROM tasks WHERE team_id=? ORDER BY created_at DESC LIMIT 100",
+        "SELECT id,author_id,assignee_id,text,status,contract_json,contract_awaiting,created_at FROM tasks WHERE team_id=? ORDER BY created_at DESC LIMIT 100",
       )
       .all(member.team_id) as TaskRow[];
     const notes = this.db
@@ -363,6 +366,7 @@ export class HubStore {
         status: row.status,
         contract:
           row.contract_json === null ? null : (JSON.parse(row.contract_json) as TeamHubContractRef),
+        contractAwaiting: row.contract_awaiting,
         createdAt: row.created_at,
       })),
       notes: notes.map((row): TeamHubNote => ({
@@ -414,7 +418,7 @@ export class HubStore {
         }
         this.db
           .prepare(
-            "INSERT INTO tasks (id,team_id,author_id,assignee_id,text,status,contract_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO tasks (id,team_id,author_id,assignee_id,text,status,contract_json,contract_awaiting,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
           )
           .run(
             id,
@@ -424,6 +428,8 @@ export class HubStore {
             message.text,
             "suggested",
             message.contract === null ? null : JSON.stringify(message.contract),
+            // Posting proposes the contract; the assignee agrees by accepting or revises it.
+            message.contract === null ? null : "assignee",
             createdAt,
           );
         break;
@@ -478,10 +484,65 @@ export class HubStore {
           .prepare("UPDATE members SET domains_json=? WHERE id=? AND team_id=?")
           .run(JSON.stringify([...new Set(message.domains)]), member.id, member.team_id);
         break;
+      case "revise_contract": {
+        const { task, party, contract } = this.contractTask(member, message.taskId);
+        if (contract.sha === message.sha) {
+          throw new HubError("The contract is already at that commit", 409);
+        }
+        this.db
+          .prepare(
+            "UPDATE tasks SET contract_json=?,contract_awaiting=? WHERE id=? AND status='suggested'",
+          )
+          .run(
+            JSON.stringify({ ...contract, sha: message.sha }),
+            party === "author" ? "assignee" : "author",
+            task.id,
+          );
+        break;
+      }
+      case "agree_contract": {
+        const { task, party, contract } = this.contractTask(member, message.taskId);
+        if (contract.sha !== message.sha) {
+          throw new HubError("The contract changed. Review the newer commit first.", 409);
+        }
+        if (task.contract_awaiting !== party) {
+          throw new HubError("The contract is not waiting on you", 409);
+        }
+        this.db
+          .prepare(
+            "UPDATE tasks SET contract_awaiting=NULL WHERE id=? AND status='suggested' AND contract_awaiting=?",
+          )
+          .run(task.id, party);
+        break;
+      }
     }
   }
 
+  /** A suggested contract task and which side `member` is on. Only the two sides may review it. */
+  private contractTask(member: MemberRow, taskId: string) {
+    const task = this.db
+      .prepare(
+        "SELECT id,author_id,assignee_id,text,status,contract_json,contract_awaiting,created_at FROM tasks WHERE id=? AND team_id=?",
+      )
+      .get(taskId, member.team_id) as TaskRow | undefined;
+    if (!task || task.status !== "suggested" || task.contract_json === null) {
+      throw new HubError("Task unavailable", 404);
+    }
+    const party: TeamHubContractParty | null =
+      task.author_id === member.id ? "author" : task.assignee_id === member.id ? "assignee" : null;
+    if (party === null) throw new HubError("Only the task's author or assignee can review it", 403);
+    return { task, party, contract: JSON.parse(task.contract_json) as TeamHubContractRef };
+  }
+
   decideTask(member: MemberRow, taskId: string, decision: "accepted" | "dismissed") {
+    if (decision === "accepted") {
+      const awaiting = this.db
+        .prepare("SELECT contract_awaiting FROM tasks WHERE id=? AND team_id=?")
+        .get(taskId, member.team_id) as { contract_awaiting: string | null } | undefined;
+      if (awaiting?.contract_awaiting === "author") {
+        throw new HubError("The revised contract is waiting on the task's author", 409);
+      }
+    }
     const result = this.db
       .prepare(
         "UPDATE tasks SET status=? WHERE id=? AND team_id=? AND status='suggested' AND (assignee_id IS NULL OR assignee_id=?)",

@@ -146,16 +146,62 @@ describe("team hub store", () => {
     store.close();
     const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "hub.sqlite"));
     db.exec(
-      "ALTER TABLE members DROP COLUMN domains_json; ALTER TABLE tasks DROP COLUMN contract_json;",
+      "ALTER TABLE members DROP COLUMN domains_json; ALTER TABLE tasks DROP COLUMN contract_json; ALTER TABLE tasks DROP COLUMN contract_awaiting;",
     );
     db.close();
     const migrated = new HubStore(dir);
     try {
       const snapshot = migrated.snapshot(migrated.authenticate(admin.credential), new Set());
       expect(snapshot.members[0]?.domains).toEqual([]);
-      expect(snapshot.tasks[0]).toMatchObject({ text: "Old task", contract: null });
+      expect(snapshot.tasks[0]).toMatchObject({
+        text: "Old task",
+        contract: null,
+        contractAwaiting: null,
+      });
     } finally {
       migrated.close();
     }
+  });
+
+  it("only lets the assignee accept a contract both sides agreed to", () => {
+    const { store } = open();
+    const admin = store.bootstrap(store.setupToken!, "Engineering", "repo", "Alice");
+    const alice = store.authenticate(admin.credential);
+    const bob = store.authenticate(
+      store.join(store.createInvite(alice, admin.team.id).token, "Bob").credential,
+    );
+    const carol = store.authenticate(
+      store.join(store.createInvite(alice, admin.team.id).token, "Carol").credential,
+    );
+    const contract = { branch: "contract/login-api", path: "api/auth.yaml", sha: "a".repeat(40) };
+    store.publish(alice, { type: "post_task", assigneeId: bob.id, text: "Login API", contract });
+    const task = () => store.snapshot(alice, new Set()).tasks[0]!;
+    expect(task().contractAwaiting).toBe("assignee");
+
+    // Bob revises; now Alice has to agree before Bob can accept.
+    store.publish(bob, { type: "revise_contract", taskId: task().id, sha: "b".repeat(40) });
+    expect(task()).toMatchObject({
+      contract: { ...contract, sha: "b".repeat(40) },
+      contractAwaiting: "author",
+    });
+    expect(() => store.decideTask(bob, task().id, "accepted")).toThrow(/waiting on/);
+    expect(() =>
+      store.publish(carol, { type: "agree_contract", taskId: task().id, sha: "b".repeat(40) }),
+    ).toThrow(/author or assignee/);
+    expect(() =>
+      store.publish(bob, { type: "agree_contract", taskId: task().id, sha: "b".repeat(40) }),
+    ).toThrow(/not waiting on you/);
+    expect(() =>
+      store.publish(alice, { type: "agree_contract", taskId: task().id, sha: "a".repeat(40) }),
+    ).toThrow(/changed/);
+
+    store.publish(alice, { type: "agree_contract", taskId: task().id, sha: "b".repeat(40) });
+    expect(task().contractAwaiting).toBeNull();
+    store.decideTask(bob, task().id, "accepted");
+    expect(task()).toMatchObject({ status: "accepted", contract: { sha: "b".repeat(40) } });
+    expect(() =>
+      store.publish(alice, { type: "revise_contract", taskId: task().id, sha: "c".repeat(40) }),
+    ).toThrow(/unavailable/);
+    store.close();
   });
 });

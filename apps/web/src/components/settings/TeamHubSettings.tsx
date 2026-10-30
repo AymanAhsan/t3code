@@ -5,6 +5,7 @@ import {
   parseTeamHubLink,
   readTeamHubInvites,
   incomingTeamHubTasks,
+  teamHubTaskTurn,
   teamHubActionErrorMessage,
   withTeamHubOrigin,
   type TeamHubAction,
@@ -263,7 +264,7 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
   }
   const snapshot = state.snapshot;
   const self = snapshot?.members.find((member) => member.id === snapshot.selfId);
-  const pendingTasks = incomingTeamHubTasks(snapshot);
+  const pendingTasks = incomingTeamHubTasks(snapshot, { includeWaiting: true });
   const memberName = (memberId: string) =>
     snapshot?.members.find((member) => member.id === memberId)?.name ?? "Teammate";
 
@@ -653,49 +654,81 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
           >
             {pendingTasks.length > 0 ? (
               <HubList>
-                {pendingTasks.map((task) => (
-                  <HubListItem
-                    key={task.id}
-                    action={
-                      <>
-                        <Button
-                          size="xs"
-                          disabled={busy || state.status !== "connected"}
-                          onClick={() =>
-                            void act({
-                              type: "decideTask",
-                              taskId: task.id,
-                              decision: "accepted",
-                            })
-                          }
-                        >
-                          Accept
-                        </Button>
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() =>
-                            void act({
-                              type: "decideTask",
-                              taskId: task.id,
-                              decision: "dismissed",
-                            })
-                          }
-                        >
-                          Dismiss
-                        </Button>
-                      </>
-                    }
-                  >
-                    <p className="text-sm">{task.text}</p>
-                    {task.contract !== null ? (
-                      <p className="truncate font-mono text-xs text-muted-foreground">
-                        Contract: {formatTeamHubContract(task.contract)}
-                      </p>
-                    ) : null}
-                  </HubListItem>
-                ))}
+                {pendingTasks.map((task) => {
+                  const turn = teamHubTaskTurn(task, snapshot.selfId);
+                  return (
+                    <HubListItem
+                      key={task.id}
+                      action={
+                        turn === "agree" ? (
+                          <Button
+                            size="xs"
+                            disabled={busy || state.status !== "connected"}
+                            onClick={() =>
+                              void act({
+                                type: "publish",
+                                input: {
+                                  type: "agree_contract",
+                                  taskId: task.id,
+                                  sha: task.contract?.sha ?? "",
+                                },
+                              })
+                            }
+                          >
+                            Agree
+                          </Button>
+                        ) : (
+                          <>
+                            <Button
+                              size="xs"
+                              disabled={busy || state.status !== "connected" || turn === "waiting"}
+                              onClick={() =>
+                                void act({
+                                  type: "decideTask",
+                                  taskId: task.id,
+                                  decision: "accepted",
+                                })
+                              }
+                            >
+                              Accept
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() =>
+                                void act({
+                                  type: "decideTask",
+                                  taskId: task.id,
+                                  decision: "dismissed",
+                                })
+                              }
+                            >
+                              Dismiss
+                            </Button>
+                          </>
+                        )
+                      }
+                    >
+                      <p className="text-sm">{task.text}</p>
+                      {task.contract !== null ? (
+                        <p className="truncate font-mono text-xs text-muted-foreground">
+                          Contract: {formatTeamHubContract(task.contract)}
+                        </p>
+                      ) : null}
+                      {turn === "agree" ? (
+                        <p className="text-xs text-muted-foreground">
+                          {memberName(task.assigneeId ?? "")} revised the contract. Agree so work
+                          can start, or ask your agent to revise it.
+                        </p>
+                      ) : turn === "waiting" ? (
+                        <p className="text-xs text-muted-foreground">
+                          Waiting for {memberName(task.authorId)} to agree to the revised contract.
+                        </p>
+                      ) : null}
+                    </HubListItem>
+                  );
+                })}
               </HubList>
             ) : null}
           </SettingsRow>

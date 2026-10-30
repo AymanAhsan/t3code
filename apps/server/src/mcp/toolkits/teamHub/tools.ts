@@ -31,7 +31,8 @@ const shared = {
 const TeamInbox = Tool.make("team_inbox", {
   ...shared,
   description:
-    "Read teammates, recent summaries, notes, and suggested tasks for this team's repository. Each teammate's domains are the repository path globs they own.",
+    "Read teammates, recent summaries, notes, and suggested tasks for this team's repository. Each teammate's domains are the repository path globs they own. " +
+    "Tasks include ones suggested to you and contract tasks you posted whose contract is waiting on your review (`contractAwaiting` is `author`).",
   success: Schema.Struct({
     members: Schema.Array(TeamHubMember),
     summaries: Schema.Array(TeamHubSummary),
@@ -48,7 +49,8 @@ const TeamPost = Tool.make("team_post", {
     "Post a short note or suggest a task to a teammate. Tasks require the human recipient to accept them. " +
     "To delegate work that crosses an interface, such as a backend API for your frontend, first commit the agreed contract file " +
     "(for example an OpenAPI or schema file) to a branch and push it, then pass `contract` with that branch, the file path, and the full commit sha. " +
-    "Without assigneeId, a contract task goes to the one teammate whose domains own the contract path.",
+    "Without assigneeId, a contract task goes to the one teammate whose domains own the contract path. " +
+    "The assignee can agree by accepting, or revise the contract with team_review_contract.",
   parameters: Schema.Struct({
     text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
     kind: Schema.Literals(["note", "task"]),
@@ -79,6 +81,20 @@ const SetDomains = Tool.make("team_set_domains", {
   success: Schema.Struct({ sent: Schema.Boolean }),
 }).annotate(Tool.Destructive, false);
 
+const ReviewContract = Tool.make("team_review_contract", {
+  ...shared,
+  description:
+    "Review the contract of a suggested contract task you posted or were assigned. Read the file at the task's sha first. " +
+    "`agree` approves that exact sha. `revise` proposes a new commit: commit the changed contract file to the same branch and path, push it, " +
+    "then pass the full sha. A revision goes back to the other side, and the assignee can only accept once both sides agreed to the same sha.",
+  parameters: Schema.Struct({
+    taskId: Schema.String,
+    decision: Schema.Literals(["agree", "revise"]),
+    sha: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/)),
+  }),
+  success: Schema.Struct({ sent: Schema.Boolean }),
+}).annotate(Tool.Destructive, false);
+
 const ListContractChanges = Tool.make("list_contract_changes", {
   ...shared,
   description: "List recent route, schema, API, and contract file changes reported by teammates.",
@@ -92,5 +108,6 @@ export const TeamHubToolkit = Toolkit.make(
   TeamPost,
   ClaimFiles,
   SetDomains,
+  ReviewContract,
   ListContractChanges,
 );
