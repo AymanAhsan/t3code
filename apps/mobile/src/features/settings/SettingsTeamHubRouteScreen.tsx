@@ -3,6 +3,7 @@ import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import {
   formatTeamHubContract,
   incomingTeamHubTasks,
+  delegatedTeamHubTasks,
   parseTeamHubDomains,
   parseTeamHubLink,
   readTeamHubInvites,
@@ -442,6 +443,42 @@ function TeamHubContent({ prepared }: { prepared: PreparedConnection }) {
                     </View>
                   );
                 })}
+              </View>
+              <View className="gap-1">
+                <Text className="font-t3-medium">Delegated work</Text>
+                <Text className="text-foreground-muted">
+                  Completed work is ready to fetch and integrate. Reopening keeps the original
+                  thread; ask the assignee to continue it.
+                </Text>
+                {delegatedTeamHubTasks(snapshot).map((task) => (
+                  <View key={task.id} className="gap-2 rounded-xl bg-grouped-card p-3">
+                    <Text>{task.text}</Text>
+                    <Text className="text-foreground-muted">
+                      {memberName(task.assigneeId)} ·{" "}
+                      {task.status === "done" ? "Done" : "In progress"}
+                    </Text>
+                    {task.result !== null && (
+                      <>
+                        <Text>{task.result.description}</Text>
+                        <Text selectable className="text-foreground-muted">
+                          {task.result.branch} @ {task.result.sha}
+                        </Text>
+                      </>
+                    )}
+                    {task.status === "done" && (
+                      <Action
+                        label="Reopen"
+                        disabled={busy || state.status !== "connected"}
+                        onPress={() =>
+                          void act({
+                            type: "publish",
+                            input: { type: "reopen_task", taskId: task.id },
+                          })
+                        }
+                      />
+                    )}
+                  </View>
+                ))}
               </View>
               <View className="gap-1">
                 <Text className="font-t3-medium">Recent activity</Text>

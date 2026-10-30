@@ -5,6 +5,7 @@ import {
   parseTeamHubLink,
   readTeamHubInvites,
   incomingTeamHubTasks,
+  delegatedTeamHubTasks,
   teamHubTaskTurn,
   teamHubActionErrorMessage,
   withTeamHubOrigin,
@@ -731,6 +732,49 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
                 })}
               </HubList>
             ) : null}
+          </SettingsRow>
+          <SettingsRow
+            title="Delegated work"
+            description="Completed work is ready to fetch and integrate. Reopening keeps the original thread; ask the assignee to continue it."
+          >
+            <HubList>
+              {delegatedTeamHubTasks(snapshot).map((task) => (
+                <HubListItem
+                  key={task.id}
+                  action={
+                    task.status === "done" ? (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={busy || state.status !== "connected"}
+                        onClick={() =>
+                          void act({
+                            type: "publish",
+                            input: { type: "reopen_task", taskId: task.id },
+                          })
+                        }
+                      >
+                        Reopen
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  <p className="text-sm">{task.text}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {memberName(task.assigneeId ?? "")} ·{" "}
+                    {task.status === "done" ? "Done" : "In progress"}
+                  </p>
+                  {task.result !== null ? (
+                    <>
+                      <p className="text-sm">{task.result.description}</p>
+                      <p className="break-all font-mono text-xs text-muted-foreground">
+                        {task.result.branch} @ {task.result.sha}
+                      </p>
+                    </>
+                  ) : null}
+                </HubListItem>
+              ))}
+            </HubList>
           </SettingsRow>
           <SettingsRow
             title="Recent activity"

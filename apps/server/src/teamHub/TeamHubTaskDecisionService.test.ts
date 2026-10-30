@@ -63,6 +63,8 @@ const snapshot: TeamHubSnapshot = {
       assigneeId: selfId,
       text: "Fix the search bug",
       status: "suggested",
+      threadId: null,
+      result: null,
       contract: null,
       contractAwaiting: null,
       createdAt: 1,
@@ -93,7 +95,7 @@ function makeHarness(
         snapshot: options.snapshot ?? snapshot,
         error: null,
       }),
-      decideTask: (_taskId, decision) =>
+      decideTask: (_taskId, decision, acceptedThreadId) =>
         Effect.gen(function* () {
           if (options.hubRejects) {
             return yield* new TeamHubService.TeamHubError({
@@ -101,7 +103,10 @@ function makeHarness(
               cause: null,
             });
           }
-          if (decision === "accepted") expect(launched.has(threadId)).toBe(true);
+          if (decision === "accepted") {
+            expect(launched.has(threadId)).toBe(true);
+            expect(acceptedThreadId).toBe(threadId);
+          }
           hubDecisions.push(decision);
         }),
     }),
@@ -164,7 +169,7 @@ describe("team hub suggested task acceptance", () => {
         expect(result.threadId).toBe(threadId);
         expect(harness.launched.get(threadId)).toEqual({
           projectId,
-          firstMessage: "Fix the search bug\n\nSuggested by Bob.",
+          firstMessage: taskPrompt(snapshot.tasks[0]!, "Bob"),
         });
         expect(harness.hubDecisions).toEqual(["accepted"]);
       }).pipe(Effect.provide(harness.layer));

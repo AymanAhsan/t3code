@@ -73,6 +73,11 @@ export class TeamHubTaskDecisionService extends Context.Service<
 /** The first message of an accepted task's thread. A contract pins the agent to the agreed file. */
 export function taskPrompt(task: TeamHubTask, author: string): string {
   const lines = [task.text, "", `Suggested by ${author}.`];
+  lines.push(
+    "",
+    `Team task: ${task.id}.`,
+    "When the requested work is ready, run the relevant checks, commit and push it, then call team_complete_task with this task id, branch, full commit sha, and a short summary including the checks you ran. Ending a turn alone does not complete the task.",
+  );
   const contract = task.contract;
   if (contract !== null) {
     lines.push(
@@ -241,7 +246,7 @@ const make = Effect.gen(function* () {
     }
     const launched = launchResult.success;
 
-    const accepted = yield* Effect.result(hub.decideTask(taskId, "accepted"));
+    const accepted = yield* Effect.result(hub.decideTask(taskId, "accepted", launched.threadId));
     if (Result.isFailure(accepted)) {
       yield* removeThread(launched.threadId).pipe(
         Effect.mapError(
