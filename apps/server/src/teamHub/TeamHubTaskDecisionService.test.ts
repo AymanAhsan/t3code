@@ -10,6 +10,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -78,6 +79,7 @@ const snapshot: TeamHubSnapshot = {
 function makeHarness(
   options: {
     matchingProject?: boolean;
+    reserve?: boolean;
     hubRejects?: boolean;
     launchFails?: boolean;
     projects?: ReadonlyArray<OrchestrationProjectShell>;
@@ -87,8 +89,25 @@ function makeHarness(
 ) {
   const launched = new Map<ThreadId, { projectId: ProjectId; firstMessage: string }>();
   const hubDecisions: Array<"accepted" | "dismissed"> = [];
+  const reservations: string[] = [];
+  const released: string[] = [];
   const dependencies = Layer.mergeAll(
     Layer.mock(TeamHubService.TeamHubService)({
+      stream: Stream.make({
+        url: "http://localhost:3000",
+        status: "connected" as const,
+        snapshot: options.snapshot ?? snapshot,
+        error: null,
+      }),
+      reserveAutoStart: (id) =>
+        Effect.sync(() => {
+          reservations.push(id);
+          return { reserved: options.reserve !== false };
+        }),
+      releaseAutoStart: (id) =>
+        Effect.sync(() => {
+          released.push(id);
+        }),
       state: Effect.succeed({
         url: "http://localhost:3000",
         status: "connected" as const,
@@ -155,7 +174,13 @@ function makeHarness(
     makeProviderRegistryLayer(),
     NodeCrypto.layer,
   );
-  return { layer: layer.pipe(Layer.provideMerge(dependencies)), launched, hubDecisions };
+  return {
+    layer: layer.pipe(Layer.provideMerge(dependencies)),
+    launched,
+    hubDecisions,
+    reservations,
+    released,
+  };
 }
 
 describe("team hub suggested task acceptance", () => {
@@ -258,5 +283,71 @@ describe("accepted task prompt", () => {
       `Contract: api/auth.yaml on branch contract/login-api at ${"b".repeat(40)}.`,
     );
     expect(prompt).toContain("git fetch origin contract/login-api");
+  });
+});
+
+describe("automatic task startup", () => {
+  const automaticSnapshot: TeamHubSnapshot = {
+    ...snapshot,
+    members: snapshot.members.map((member) =>
+      member.id === selfId
+        ? {
+            ...member,
+            domains: ["api/**"],
+            autoAccept: { trustedAuthorIds: [authorId], remainingStarts: 3 },
+          }
+        : member,
+    ),
+    tasks: [
+      {
+        ...snapshot.tasks[0]!,
+        contract: { branch: "contract/search", path: "api/search.yaml", sha: "a".repeat(40) },
+      },
+    ],
+  };
+
+  it.effect(
+    "starts eligible work through the normal launch path after reserving its allowance",
+    () => {
+      const harness = makeHarness({ snapshot: automaticSnapshot });
+      return Effect.gen(function* () {
+        const decisions = yield* TeamHubTaskDecisionService;
+        yield* decisions.startAutomaticTasks;
+        expect(harness.reservations).toEqual([taskId]);
+        expect(harness.hubDecisions).toEqual(["accepted"]);
+        expect(harness.launched.size).toBe(1);
+        expect(harness.released).toEqual([taskId]);
+      }).pipe(Effect.provide(harness.layer));
+    },
+  );
+
+  it.effect("does not launch when the hub refuses the reservation", () => {
+    const harness = makeHarness({ snapshot: automaticSnapshot, reserve: false });
+    return Effect.gen(function* () {
+      yield* (yield* TeamHubTaskDecisionService).startAutomaticTasks;
+      expect(harness.reservations).toEqual([taskId]);
+      expect(harness.hubDecisions).toEqual([]);
+      expect(harness.launched.size).toBe(0);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("releases failed launches for manual recovery without accepting the task", () => {
+    const harness = makeHarness({ snapshot: automaticSnapshot, launchFails: true });
+    return Effect.gen(function* () {
+      yield* (yield* TeamHubTaskDecisionService).startAutomaticTasks;
+      expect(harness.reservations).toEqual([taskId]);
+      expect(harness.released).toEqual([taskId]);
+      expect(harness.hubDecisions).toEqual([]);
+      expect(harness.launched.size).toBe(0);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("does not attempt tasks when automatic acceptance is off", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      yield* (yield* TeamHubTaskDecisionService).startAutomaticTasks;
+      expect(harness.reservations).toEqual([]);
+      expect(harness.launched.size).toBe(0);
+    }).pipe(Effect.provide(harness.layer));
   });
 });

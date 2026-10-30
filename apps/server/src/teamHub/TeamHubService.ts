@@ -66,10 +66,20 @@ export class TeamHubService extends Context.Service<
     readonly revokeInvite: (inviteId: string) => Effect.Effect<void, TeamHubError>;
     readonly updateRepo: (repo: string) => Effect.Effect<void, TeamHubError>;
     readonly removeMember: (memberId: string) => Effect.Effect<void, TeamHubError>;
+    readonly reserveAutoStart: (
+      taskId: string,
+      token: string,
+      sha: string,
+    ) => Effect.Effect<{ reserved: boolean }, TeamHubError>;
+    readonly releaseAutoStart: (
+      taskId: string,
+      token: string,
+    ) => Effect.Effect<unknown, TeamHubError>;
     readonly decideTask: (
       taskId: string,
       decision: "accepted" | "dismissed",
       threadId?: ThreadId,
+      autoStartToken?: string,
     ) => Effect.Effect<void, TeamHubError>;
   }
 >()("t3/teamHub/TeamHubService") {}
@@ -363,8 +373,12 @@ const make = Effect.gen(function* () {
     revokeInvite: (inviteId) => request("/api/invites/revoke", { inviteId }),
     updateRepo: (repo) => request("/api/team/repo", { repo }),
     removeMember: (memberId) => request("/api/members/remove", { memberId }),
-    decideTask: (taskId, decision, threadId) =>
-      request("/api/tasks/decide", { taskId, decision, threadId }),
+    reserveAutoStart: (taskId, token, sha) =>
+      request("/api/tasks/auto-start", { taskId, token, sha }),
+    releaseAutoStart: (taskId, token) =>
+      request("/api/tasks/auto-start-release", { taskId, token }),
+    decideTask: (taskId, decision, threadId, autoStartToken) =>
+      request("/api/tasks/decide", { taskId, decision, threadId, autoStartToken }),
   });
 });
 

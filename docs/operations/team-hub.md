@@ -49,7 +49,7 @@ Invites expire after 24 hours and admins can revoke them from the Team hub panel
 
 ## Protocol
 
-The hub requires protocol version 4 for WebSocket connections and responds with HTTP 426 when the client uses a different version. Version 4 adds task-linked checkpoint summaries, completion results, and reopening. Update the hub and every teammate's T3 Code together. An existing hub database gains the new columns on its first start. Previously accepted tasks have no thread link; post and accept a new task to use completion reporting for that work.
+The hub requires protocol version 5 for WebSocket connections and responds with HTTP 426 when the client uses a different version. Version 5 adds per-member automatic-start allowances and durable task reservations. Update all connected environments before enabling automatic tasks. Update the hub and every teammate's T3 Code together. An existing hub database gains the new columns on its first start. Previously accepted tasks have no thread link; post and accept a new task to use completion reporting for that work.
 
 ## Local development with Alice and Bob
 

@@ -14,7 +14,15 @@ If you choose Tailscale, T3 Code checks Tailscale on your computer, tells you wh
 
 Under **Your areas** in the Team hub panel, list the repository paths you own, such as `apps/api/**`, one per line. When an agent needs work done in someone else's area, for example a backend API for the frontend it is building, it first commits the agreed contract file (an API spec or shared schema) to a branch and pushes it. It then suggests a task that points at that file and commit. The task goes to the teammate whose areas cover the file. If nobody's areas match, or several people's do, the agent has to name the teammate instead. The task shows the contract next to its text. Accepting it starts a thread that fetches the contract and builds against it.
 
-If the contract needs changes before you start, ask your agent to revise it. It pushes the new version to the same branch and proposes that commit instead. The teammate who posted the task then sees an **Agree** button, or can have their agent revise it back. You can accept only once both of you agreed to the same commit, so the thread always starts from a contract you both approved. Tasks still need the teammate to accept them; nothing runs on their machine automatically.
+If the contract needs changes before you start, ask your agent to revise it. It pushes the new version to the same branch and proposes that commit instead. The teammate who posted the task then sees an **Agree** button, or can have their agent revise it back. You can accept only once both of you agreed to the same commit, so the thread always starts from a contract you both approved. Tasks normally need the teammate to accept them.
+
+### Automatically accepting trusted work
+
+In **Settings → Integrations → Team hub → Automatic tasks**, select the teammates you trust, then choose **Allow 3 starts**. This is off by default. Only contract tasks explicitly assigned to you, with the contract inside your areas and no outstanding author review, can start automatically. This also accepts the pinned contract on your behalf.
+
+Each allowance permits three attempts, including failed launches, and only one automatic task can be in progress at a time. Completing work never renews the allowance. Choose **Turn off** to prevent further starts; existing threads keep running. Changing trusted teammates turns off the allowance until you enable it again. The same controls are available on mobile and apply to your member across connected environments.
+
+**Delegated work** labels tasks that started automatically. A failed attempt remains in **Suggested tasks** for manual acceptance or dismissal. If a server stopped during startup, dismiss that pending task to release its slot. A restart or reconnect never retries an automatic attempt.
 
 When the work is ready, the accepted thread's agent runs the relevant checks, commits and pushes the work, then marks the task done with `team_complete_task`. Ending a turn only shares progress. **Delegated work** in the Team hub panel and `team_inbox` show the completion summary, branch, and full commit so the teammate who requested it can fetch and integrate it. Completion reports the agent's readiness; it does not merge the work or independently certify its tests.
 

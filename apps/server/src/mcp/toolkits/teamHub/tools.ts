@@ -47,7 +47,7 @@ const TeamInbox = Tool.make("team_inbox", {
 const TeamPost = Tool.make("team_post", {
   ...shared,
   description:
-    "Post a short note or suggest a task to a teammate. Tasks require the human recipient to accept them. " +
+    "Post a short note or suggest a task to a teammate. Tasks require recipient acceptance unless that member has enabled a limited automatic-start allowance for you and the contract is inside their areas. " +
     "To delegate work that crosses an interface, such as a backend API for your frontend, first commit the agreed contract file " +
     "(for example an OpenAPI or schema file) to a branch and push it, then pass `contract` with that branch, the file path, and the full commit sha. " +
     "Without assigneeId, a contract task goes to the one teammate whose domains own the contract path. " +

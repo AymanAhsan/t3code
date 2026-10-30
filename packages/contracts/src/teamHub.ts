@@ -3,7 +3,7 @@ import { ThreadId } from "./baseSchemas.ts";
 
 import { PortSchema } from "./baseSchemas.ts";
 
-export const TEAM_HUB_PROTOCOL_VERSION = 4;
+export const TEAM_HUB_PROTOCOL_VERSION = 5;
 
 const Text = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/));
@@ -11,12 +11,24 @@ const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/));
 /** Repository path globs a member owns, such as `apps/api/**`. Used to route tasks. */
 export const TeamHubDomains = Schema.Array(Text).check(Schema.isMaxLength(20));
 
+/** A finite allowance must be renewed by the member; completing work never refills it. */
+export const TeamHubAutoAccept = Schema.Struct({
+  trustedAuthorIds: Schema.Array(Id).check(Schema.isMaxLength(100)),
+  remainingStarts: Schema.Number.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: 0, maximum: 5 }),
+  ),
+});
+
+export type TeamHubAutoAccept = typeof TeamHubAutoAccept.Type;
+
 export const TeamHubMember = Schema.Struct({
   id: Id,
   name: Text,
   role: Schema.Literals(["admin", "member"]),
   online: Schema.Boolean,
   domains: TeamHubDomains,
+  autoAccept: Schema.optionalKey(TeamHubAutoAccept),
 });
 export type TeamHubMember = typeof TeamHubMember.Type;
 
@@ -60,6 +72,8 @@ export const TeamHubTask = Schema.Struct({
   text: Text,
   status: Schema.Literals(["suggested", "accepted", "dismissed", "done"]),
   threadId: Schema.NullOr(ThreadId),
+  autoStartAttempted: Schema.optionalKey(Schema.Boolean),
+  autoStarted: Schema.optionalKey(Schema.Boolean),
   result: Schema.NullOr(TeamHubTaskResult),
   contract: Schema.NullOr(TeamHubContractRef),
   /**
@@ -300,6 +314,11 @@ export const TeamHubReopenTask = Schema.Struct({
   taskId: Id,
 });
 
+export const TeamHubSetAutoAccept = Schema.Struct({
+  type: Schema.Literal("set_auto_accept"),
+  policy: TeamHubAutoAccept,
+});
+
 export const TeamHubClientMessage = Schema.Union([
   TeamHubPublishSummary,
   TeamHubPostTask,
@@ -308,9 +327,35 @@ export const TeamHubClientMessage = Schema.Union([
   TeamHubReleaseFiles,
   TeamHubPostContractChange,
   TeamHubSetDomains,
+  TeamHubSetAutoAccept,
   TeamHubReviseContract,
   TeamHubAgreeContract,
   TeamHubCompleteTask,
   TeamHubReopenTask,
 ]);
 export type TeamHubClientMessage = typeof TeamHubClientMessage.Type;
+
+/**
+ * Matches a repository-relative path against a domain glob. `**` spans
+ * directories, `*` and `?` stay within one segment, and a trailing `/` owns
+ * everything below it.
+ */
+export function matchesDomain(path: string, glob: string): boolean {
+  const pattern = glob.endsWith("/") ? `${glob}**` : glob;
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index]!;
+    if (char === "*" && pattern[index + 1] === "*") {
+      const slash = pattern[index + 2] === "/";
+      source += slash ? "(?:.*/)?" : ".*";
+      index += slash ? 2 : 1;
+    } else if (char === "*") {
+      source += "[^/]*";
+    } else if (char === "?") {
+      source += "[^/]";
+    } else {
+      source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  return new RegExp(`^${source}$`).test(path.replace(/^\.?\//, ""));
+}

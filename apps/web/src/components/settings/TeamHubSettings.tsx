@@ -639,6 +639,79 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
               <p className="py-2 font-mono text-xs break-all">{self.domains.join(", ")}</p>
             ) : null}
           </SettingsRow>
+          <SettingsRow
+            title="Automatic tasks"
+            description="Allow contract tasks inside your areas from trusted teammates to start agents. One automatic task runs at a time. Each allowance permits up to 3 attempts, including failures; renew it when needed."
+            control={
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={
+                  busy ||
+                  state.status !== "connected" ||
+                  ((self?.autoAccept?.remainingStarts ?? 0) === 0 &&
+                    !self?.autoAccept?.trustedAuthorIds.length)
+                }
+                onClick={() =>
+                  void act({
+                    type: "publish",
+                    input: {
+                      type: "set_auto_accept",
+                      policy: {
+                        trustedAuthorIds: self?.autoAccept?.trustedAuthorIds ?? [],
+                        remainingStarts: (self?.autoAccept?.remainingStarts ?? 0) > 0 ? 0 : 3,
+                      },
+                    },
+                  })
+                }
+              >
+                {(self?.autoAccept?.remainingStarts ?? 0) > 0 ? "Turn off" : "Allow 3 starts"}
+              </Button>
+            }
+          >
+            <p className="py-2 text-xs text-muted-foreground">
+              {self?.autoAccept?.remainingStarts ?? 0} automatic starts remaining. Turning off
+              leaves existing threads running. Changing trust turns off the allowance.
+            </p>
+            <HubList>
+              {snapshot.members
+                .filter((member) => member.id !== snapshot.selfId)
+                .map((member) => {
+                  const trusted = self?.autoAccept?.trustedAuthorIds ?? [];
+                  const selected = trusted.includes(member.id);
+                  return (
+                    <HubListItem
+                      key={member.id}
+                      action={
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          disabled={busy || state.status !== "connected"}
+                          onClick={() =>
+                            void act({
+                              type: "publish",
+                              input: {
+                                type: "set_auto_accept",
+                                policy: {
+                                  remainingStarts: 0,
+                                  trustedAuthorIds: selected
+                                    ? trusted.filter((id) => id !== member.id)
+                                    : [...trusted, member.id],
+                                },
+                              },
+                            })
+                          }
+                        >
+                          {selected ? "Remove trust" : "Trust"}
+                        </Button>
+                      }
+                    >
+                      <p className="text-sm">{member.name}</p>
+                    </HubListItem>
+                  );
+                })}
+            </HubList>
+          </SettingsRow>
           {self?.role === "admin" && (
             <AdminInvites
               prepared={prepared}
@@ -712,6 +785,12 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
                       }
                     >
                       <p className="text-sm">{task.text}</p>
+                      {task.status === "suggested" && task.autoStartAttempted ? (
+                        <p className="text-xs text-muted-foreground">
+                          Automatic start attempted. Accept manually to retry, or dismiss to cancel
+                          a pending start.
+                        </p>
+                      ) : null}
                       {task.contract !== null ? (
                         <p className="truncate font-mono text-xs text-muted-foreground">
                           Contract: {formatTeamHubContract(task.contract)}
@@ -760,10 +839,36 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
                   }
                 >
                   <p className="text-sm">{task.text}</p>
+                  {task.status === "suggested" && task.autoStartAttempted ? (
+                    <p className="text-xs text-muted-foreground">
+                      Automatic start attempted. Accept manually to retry, or dismiss to cancel a
+                      pending start.
+                    </p>
+                  ) : null}
                   <p className="text-xs text-muted-foreground">
                     {memberName(task.assigneeId ?? "")} ·{" "}
                     {task.status === "done" ? "Done" : "In progress"}
+                    {task.autoStarted ? " · Started automatically" : ""}
                   </p>
+                  {task.autoStarted &&
+                  task.threadId !== null &&
+                  task.assigneeId === snapshot.selfId ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => {
+                        if (task.threadId !== null)
+                          void navigate({
+                            to: "/$environmentId/$threadId",
+                            params: buildThreadRouteParams(
+                              scopeThreadRef(prepared.environmentId, task.threadId),
+                            ),
+                          });
+                      }}
+                    >
+                      Open thread
+                    </Button>
+                  ) : null}
                   {task.result !== null ? (
                     <>
                       <p className="text-sm">{task.result.description}</p>
