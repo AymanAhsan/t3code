@@ -41,6 +41,7 @@ const member = (id: string, name: string, domains: string[]): TeamHubMember => (
   role: "member",
   online: true,
   domains,
+  activity: { provider: null, working: false },
 });
 const alice = member("alice", "Alice", ["apps/web/**"]);
 const bob = member("bob", "Bob", ["api/**"]);

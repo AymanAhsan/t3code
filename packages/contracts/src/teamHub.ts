@@ -3,7 +3,7 @@ import { ThreadId } from "./baseSchemas.ts";
 
 import { PortSchema } from "./baseSchemas.ts";
 
-export const TEAM_HUB_PROTOCOL_VERSION = 3;
+export const TEAM_HUB_PROTOCOL_VERSION = 4;
 
 const Text = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256));
 const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/));
@@ -11,12 +11,24 @@ const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/));
 /** Repository path globs a member owns, such as `apps/api/**`. Used to route tasks. */
 export const TeamHubDomains = Schema.Array(Text).check(Schema.isMaxLength(20));
 
+/**
+ * What a member's agents are doing, as their own server last reported it. `provider` is the
+ * driver kind (`claudeAgent`, `codex`, ...) of the agent they ran most recently. The hub keeps
+ * this in memory only, so it survives reconnects but not a hub restart.
+ */
+export const TeamHubActivity = Schema.Struct({
+  provider: Schema.NullOr(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))),
+  working: Schema.Boolean,
+});
+export type TeamHubActivity = typeof TeamHubActivity.Type;
+
 export const TeamHubMember = Schema.Struct({
   id: Id,
   name: Text,
   role: Schema.Literals(["admin", "member"]),
   online: Schema.Boolean,
   domains: TeamHubDomains,
+  activity: TeamHubActivity,
 });
 export type TeamHubMember = typeof TeamHubMember.Type;
 
@@ -277,7 +289,15 @@ export const TeamHubAgreeContract = Schema.Struct({
 });
 export type TeamHubAgreeContract = typeof TeamHubAgreeContract.Type;
 
+/** Replaces the sender's activity. Sent by the member's server whenever it changes. */
+export const TeamHubSetActivity = Schema.Struct({
+  type: Schema.Literal("set_activity"),
+  ...TeamHubActivity.fields,
+});
+export type TeamHubSetActivity = typeof TeamHubSetActivity.Type;
+
 export const TeamHubClientMessage = Schema.Union([
+  TeamHubSetActivity,
   TeamHubPublishSummary,
   TeamHubPostTask,
   TeamHubPostNote,

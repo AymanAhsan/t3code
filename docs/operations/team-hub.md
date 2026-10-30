@@ -49,7 +49,7 @@ Invites expire after 24 hours and admins can revoke them from the Team hub panel
 
 ## Protocol
 
-The hub requires protocol version 3 for WebSocket connections and responds with HTTP 426 when the client uses a different version. Version 2 added member areas and contract-linked tasks; version 3 added contract revisions and agreement. Update the hub and every teammate's T3 Code together. An existing hub database gains the new columns on its first start.
+The hub requires protocol version 4 for WebSocket connections and responds with HTTP 426 when the client uses a different version. Version 2 added member areas and contract-linked tasks; version 3 added contract revisions and agreement; version 4 added member activity (whether an agent is running, and which kind), which the hub keeps in memory and forgets on restart. Update the hub and every teammate's T3 Code together. An existing hub database gains the new columns on its first start.
 
 ## Local development with Alice and Bob
 

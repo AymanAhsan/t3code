@@ -81,6 +81,7 @@ import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TeamHubNetwork from "./teamHub/TeamHubNetwork.ts";
 import * as TeamHubService from "./teamHub/TeamHubService.ts";
+import * as TeamHubActivityReporter from "./teamHub/TeamHubActivityReporter.ts";
 import { teamHubHttpApiLayer } from "./teamHub/http.ts";
 import * as TeamHubDelegationService from "./teamHub/TeamHubDelegationService.ts";
 import * as TeamHubTaskDecisionService from "./teamHub/TeamHubTaskDecisionService.ts";
@@ -644,6 +645,7 @@ const RuntimeMiscDependenciesLive = RuntimeCoreDependenciesLive.pipe(
 const RuntimeDependenciesLive = Layer.mergeAll(
   TeamHubTaskDecisionService.layer,
   TeamHubDelegationService.layer,
+  TeamHubActivityReporter.layer,
 ).pipe(Layer.provideMerge(RuntimeMiscDependenciesLive));
 
 const commandReadinessLayer = HttpRouter.middleware(

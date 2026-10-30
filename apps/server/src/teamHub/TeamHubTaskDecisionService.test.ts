@@ -52,8 +52,22 @@ const snapshot: TeamHubSnapshot = {
   },
   selfId,
   members: [
-    { id: authorId, name: "Bob", role: "member", online: true, domains: [] },
-    { id: selfId, name: "Alice", role: "member", online: true, domains: [] },
+    {
+      id: authorId,
+      name: "Bob",
+      role: "member",
+      online: true,
+      domains: [],
+      activity: { provider: null, working: false },
+    },
+    {
+      id: selfId,
+      name: "Alice",
+      role: "member",
+      online: true,
+      domains: [],
+      activity: { provider: null, working: false },
+    },
   ],
   summaries: [],
   tasks: [

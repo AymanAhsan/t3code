@@ -1,5 +1,6 @@
 // @effect-diagnostics globalFetchInEffect:off globalTimers:off preferSchemaOverJson:off - The hub connector owns the native WebSocket and its companion HTTP requests.
 import type {
+  TeamHubActivity,
   TeamHubBootstrapInput,
   TeamHubClientMessage,
   TeamHubInviteRecord,
@@ -56,6 +57,8 @@ export class TeamHubService extends Context.Service<
       readonly files: ReadonlyArray<string>;
       readonly description: string;
     }) => Effect.Effect<void>;
+    /** Tells the team what this machine's agents are doing. Unchanged reports are dropped. */
+    readonly reportActivity: (activity: TeamHubActivity) => Effect.Effect<void>;
     readonly createInvite: Effect.Effect<
       { id: string; token: string; expiresAt: number },
       TeamHubError
@@ -102,6 +105,14 @@ const make = Effect.gen(function* () {
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let stopped = false;
+  // Resent after every hello, so the hub learns it again after a reconnect or a hub restart.
+  let activity: TeamHubActivity | null = null;
+  const sendActivity = () => {
+    if (!activity || !socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(
+      JSON.stringify({ type: "set_activity", ...activity } satisfies TeamHubClientMessage),
+    );
+  };
 
   const disconnect = () => {
     if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -131,6 +142,7 @@ const make = Effect.gen(function* () {
     current.addEventListener("open", () => {
       if (socket !== current) return;
       current.send(JSON.stringify({ type: "hello", credential }));
+      sendActivity();
     });
     current.addEventListener("message", (event) => {
       if (socket !== current) return;
@@ -347,6 +359,12 @@ const make = Effect.gen(function* () {
             } satisfies TeamHubClientMessage),
           );
         }
+      }),
+    reportActivity: (next) =>
+      Effect.sync(() => {
+        if (activity?.provider === next.provider && activity.working === next.working) return;
+        activity = next;
+        sendActivity();
       }),
     createInvite: request("/api/invites", {}),
     listInvites: request("/api/invites"),

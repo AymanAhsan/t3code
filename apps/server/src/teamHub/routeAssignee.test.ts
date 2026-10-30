@@ -8,6 +8,7 @@ const member = (id: string, domains: string[]): TeamHubMember => ({
   role: "member",
   online: true,
   domains,
+  activity: { provider: null, working: false },
 });
 
 describe("matchesDomain", () => {

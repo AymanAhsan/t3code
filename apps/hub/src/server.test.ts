@@ -124,6 +124,70 @@ describe("team hub server", () => {
     }
   });
 
+  it("shares member activity, skips unchanged reports, and keeps it after a disconnect", async () => {
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-team-hub-activity-"));
+    dirs.push(dir);
+    const store = new HubStore(dir);
+    const admin = store.bootstrap(
+      store.setupToken!,
+      "Engineering",
+      "github.com/example/repo",
+      "Alice",
+    );
+    const bob = store.join(
+      store.createInvite(store.authenticate(admin.credential), admin.team.id).token,
+      "Bob",
+    );
+    const server = await createHubServer(store, { host: "127.0.0.1", port: 0 });
+    const url = `ws://127.0.0.1:${server.port}/ws?version=${TEAM_HUB_PROTOCOL_VERSION}`;
+    const aliceSocket = new WebSocket(url);
+    const bobSocket = new WebSocket(url);
+    type Members = {
+      snapshot: { members: { name: string; online: boolean; activity: unknown }[] };
+    };
+    const alice = (message: unknown) =>
+      (message as Members).snapshot.members.find((member) => member.name === "Alice");
+    try {
+      await Promise.all([
+        new Promise<void>((resolve) => aliceSocket.once("open", resolve)),
+        new Promise<void>((resolve) => bobSocket.once("open", resolve)),
+      ]);
+      const aliceInitial = nextMessage(aliceSocket);
+      aliceSocket.send(JSON.stringify({ type: "hello", credential: admin.credential }));
+      await aliceInitial;
+      const bobInitial = nextMessage(bobSocket);
+      bobSocket.send(JSON.stringify({ type: "hello", credential: bob.credential }));
+      expect(alice(await bobInitial)?.activity).toEqual({ provider: null, working: false });
+
+      const working = { type: "set_activity", provider: "claudeAgent", working: true };
+      const bobActivity = nextMessage(bobSocket);
+      aliceSocket.send(JSON.stringify(working));
+      expect(alice(await bobActivity)?.activity).toEqual({
+        provider: "claudeAgent",
+        working: true,
+      });
+
+      // The repeat is dropped, so Bob's next snapshot is the one for the summary.
+      const bobNext = nextMessage(bobSocket);
+      aliceSocket.send(JSON.stringify(working));
+      aliceSocket.send(
+        JSON.stringify({ type: "publish_summary", branch: "main", files: [], description: "x" }),
+      );
+      expect(await bobNext).toMatchObject({ snapshot: { summaries: [{ branch: "main" }] } });
+
+      const bobPresence = nextMessage(bobSocket);
+      aliceSocket.terminate();
+      const offline = alice(await bobPresence);
+      expect(offline?.online).toBe(false);
+      expect(offline?.activity).toEqual({ provider: "claudeAgent", working: true });
+    } finally {
+      aliceSocket.terminate();
+      bobSocket.terminate();
+      await server.close();
+      store.close();
+    }
+  });
+
   it("drops a client that stops answering pings and keeps one that does", async () => {
     const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-team-hub-heartbeat-"));
     dirs.push(dir);

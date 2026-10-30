@@ -1,16 +1,19 @@
 import { useAtomValue } from "@effect/atom-react";
 import { incomingTeamHubTasks } from "@t3tools/client-runtime/state/team-hub";
 import type { EnvironmentId } from "@t3tools/contracts";
+import type { TeamHubMember } from "@t3tools/contracts/teamHub";
 import { Link, useLocation } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { LogInIcon, UsersIcon } from "lucide-react";
 import { memo, useCallback } from "react";
 
+import { cn } from "~/lib/utils";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { teamHubStateAtom } from "../../state/teamHub";
 import { Badge } from "../ui/badge";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "../ui/sidebar";
+import { TeamBuddy, teamBuddyProviderLabel } from "./TeamBuddy";
 
 /**
  * Team hub entry above the project list. Reads the hub subscription the app already keeps
@@ -92,7 +95,66 @@ function TeamBlock({ environmentId }: { environmentId: EnvironmentId }) {
             </Badge>
           ) : null}
         </SidebarMenuButton>
+        {snapshot && snapshot.members.length > 0 ? (
+          <ul
+            aria-label={`${teamName} members`}
+            className="mt-0.5 ml-3.5 flex flex-col group-data-[collapsible=icon]:hidden"
+          >
+            {snapshot.members.map((member) => (
+              <TeamMemberRow
+                key={member.id}
+                member={member}
+                isSelf={member.id === snapshot.selfId}
+                onNavigate={closeMobileSidebar}
+              />
+            ))}
+          </ul>
+        ) : null}
       </SidebarMenuItem>
     </SidebarMenu>
   );
 }
+
+function memberStatus(member: TeamHubMember) {
+  const agent = teamBuddyProviderLabel(member.activity.provider);
+  if (!member.online) return "offline";
+  if (member.activity.working) return agent ? `working with ${agent}` : "working";
+  return agent ? `idle, last used ${agent}` : "idle";
+}
+
+// Tree rows: the `before` rule is the trunk (stopping at the elbow on the last row), `after` the
+// branch into the buddy.
+const TeamMemberRow = memo(function TeamMemberRow(props: {
+  member: TeamHubMember;
+  isSelf: boolean;
+  onNavigate: () => void;
+}) {
+  const { member } = props;
+  const status = memberStatus(member);
+  return (
+    <li className="relative pl-3 before:absolute before:top-0 before:left-0 before:h-full before:w-px before:bg-sidebar-border last:before:h-1/2 after:absolute after:top-1/2 after:left-0 after:h-px after:w-2 after:bg-sidebar-border">
+      <Link
+        to="/team"
+        onClick={props.onNavigate}
+        title={`${member.name}: ${status}`}
+        className="flex h-7 min-w-0 items-center gap-2 rounded-md px-1.5 text-sm text-sidebar-foreground outline-hidden hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <TeamBuddy
+          provider={member.activity.provider}
+          working={member.online && member.activity.working}
+          online={member.online}
+        />
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            !member.online && "text-sidebar-muted-foreground",
+          )}
+        >
+          {member.name}
+          {props.isSelf ? <span className="text-sidebar-muted-foreground"> (you)</span> : null}
+        </span>
+        <span className="sr-only">, {status}</span>
+      </Link>
+    </li>
+  );
+});
