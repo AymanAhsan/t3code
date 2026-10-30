@@ -3,7 +3,11 @@ import * as NodeHttp from "node:http";
 import type * as NodeStream from "node:stream";
 import { Schema } from "effect";
 import WebSocket, { WebSocketServer } from "ws";
-import { TEAM_HUB_PROTOCOL_VERSION, TeamHubClientMessage } from "@t3tools/contracts/teamHub";
+import {
+  TEAM_HUB_PROTOCOL_VERSION,
+  TeamHubClientMessage,
+  type TeamHubActivity,
+} from "@t3tools/contracts/teamHub";
 import { ThreadId } from "@t3tools/contracts";
 import { HubError, HubStore } from "./store.ts";
 
@@ -90,12 +94,28 @@ export async function createHubServer(
     maxPayload: 16 * 1024,
     perMessageDeflate: false,
   });
+  // Last activity each member's server reported. Kept after they disconnect so the sidebar
+  // still shows which agent they used last.
+  const activity = new Map<string, TeamHubActivity>();
   const online = (teamId: string) =>
     new Set(
       [...connections]
         .filter((item) => item.member.team_id === teamId)
         .map((item) => item.member.id),
     );
+  const snapshot = (member: Connected["member"]) =>
+    store.snapshot(member, online(member.team_id), activity);
+  /** Applies a client message and reports whether the team needs a fresh snapshot. */
+  const apply = (member: Connected["member"], message: TeamHubClientMessage) => {
+    if (message.type !== "set_activity") {
+      store.publish(member, message);
+      return true;
+    }
+    const prior = activity.get(member.id);
+    if (prior?.provider === message.provider && prior.working === message.working) return false;
+    activity.set(member.id, { provider: message.provider, working: message.working });
+    return true;
+  };
   const broadcast = (teamId: string) => {
     for (const connection of connections) {
       if (connection.member.team_id !== teamId || connection.socket.readyState !== WebSocket.OPEN)
@@ -104,7 +124,7 @@ export async function createHubServer(
         JSON.stringify({
           type: "snapshot",
           protocolVersion: TEAM_HUB_PROTOCOL_VERSION,
-          snapshot: store.snapshot(connection.member, online(teamId)),
+          snapshot: snapshot(connection.member),
         }),
       );
     }
@@ -139,7 +159,7 @@ export async function createHubServer(
       }
       if (request.method === "GET" && url.pathname === "/api/snapshot") {
         const member = authenticate(store, request);
-        return json(response, 200, store.snapshot(member, online(member.team_id)));
+        return json(response, 200, snapshot(member));
       }
       if (request.method === "POST" && url.pathname === "/api/publish") {
         const member = authenticate(store, request);
@@ -149,8 +169,7 @@ export async function createHubServer(
         } catch {
           throw new HubError("Invalid team message", 400);
         }
-        store.publish(member, message);
-        broadcast(member.team_id);
+        if (apply(member, message)) broadcast(member.team_id);
         return json(response, 200, { ok: true });
       }
       if (request.method === "POST" && url.pathname === "/api/invites") {
@@ -193,6 +212,7 @@ export async function createHubServer(
         const input = await body(request);
         const memberId = string(input.memberId, "member ID");
         store.removeMember(member, member.team_id, memberId);
+        activity.delete(memberId);
         for (const connection of connections) {
           if (connection.member.id === memberId) {
             connections.delete(connection);
@@ -292,8 +312,7 @@ export async function createHubServer(
         // A removed member's already-open socket must lose write access immediately.
         store.authenticate(connection.credential);
         const message = decodeClientMessage(parsed);
-        store.publish(connection.member, message);
-        broadcast(connection.member.team_id);
+        if (apply(connection.member, message)) broadcast(connection.member.team_id);
       } catch (error) {
         if (error instanceof HubError && error.status === 401) {
           socket.close(4003, "Membership revoked or invalid");

@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 import type {
+  TeamHubActivity,
   TeamHubAutoAccept,
   TeamHubClaim,
   TeamHubClientMessage,
@@ -19,6 +20,8 @@ import type {
 } from "@t3tools/contracts/teamHub";
 import { matchesDomain } from "@t3tools/contracts/teamHub";
 import type { ThreadId } from "@t3tools/contracts";
+
+const IDLE_ACTIVITY: TeamHubActivity = { provider: null, working: false };
 
 type TeamRow = { id: string; name: string; repo: string };
 type MemberRow = { id: string; team_id: string; name: string; role: "admin" | "member" };
@@ -337,7 +340,12 @@ export class HubStore {
     };
   }
 
-  snapshot(member: MemberRow, onlineIds: ReadonlySet<string>): TeamHubSnapshot {
+  /** `onlineIds` and `activity` are live presence the server holds in memory, keyed by member. */
+  snapshot(
+    member: MemberRow,
+    onlineIds: ReadonlySet<string>,
+    activity: ReadonlyMap<string, TeamHubActivity> = new Map(),
+  ): TeamHubSnapshot {
     const team = this.db
       .prepare("SELECT id,name,repo FROM teams WHERE id=?")
       .get(member.team_id) as TeamRow;
@@ -378,6 +386,7 @@ export class HubStore {
         role: row.role,
         online: onlineIds.has(row.id),
         domains: JSON.parse(row.domains_json) as string[],
+        activity: activity.get(row.id) ?? IDLE_ACTIVITY,
         autoAccept: this.memberAutoAccept(row, members),
       })),
       summaries: summaries.map((row): TeamHubSummary => ({
@@ -426,7 +435,7 @@ export class HubStore {
     };
   }
 
-  publish(member: MemberRow, message: TeamHubClientMessage) {
+  publish(member: MemberRow, message: Exclude<TeamHubClientMessage, { type: "set_activity" }>) {
     const createdAt = now();
     const id = NodeCrypto.randomUUID();
     switch (message.type) {

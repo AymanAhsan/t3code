@@ -29,6 +29,7 @@ import { usePrimaryEnvironmentId } from "~/state/environments";
 import { usePreparedConnection } from "~/state/session";
 import { teamHubActionCommand, teamHubStateAtom } from "~/state/teamHub";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { TEAM_HUB_INVITES_ID, type TeamHubMode } from "../team/teamHubRoute";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
@@ -143,6 +144,7 @@ function AdminInvites({
     <>
       <HubAddressRow prepared={prepared} url={url} />
       <SettingsRow
+        id={TEAM_HUB_INVITES_ID}
         title="Invites"
         description="Create a link a teammate opens to join this team."
         control={
@@ -208,13 +210,19 @@ function AdminInvites({
   );
 }
 
-function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
+function ConnectedTeamHub({
+  prepared,
+  initialMode,
+}: {
+  prepared: PreparedConnection;
+  initialMode: TeamHubMode;
+}) {
   const query = teamHubStateAtom({ environmentId: prepared.environmentId, input: {} });
   const result = useAtomValue(query);
   const state = Option.getOrNull(AsyncResult.value(result));
   const [joinLink, setJoinLink] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [settingUp, setSettingUp] = useState(false);
+  const [settingUp, setSettingUp] = useState(initialMode === "setup");
   const [teamName, setTeamName] = useState("");
   const [repo, setRepo] = useState("");
   const [editingRepo, setEditingRepo] = useState(false);
@@ -943,13 +951,13 @@ function ConnectedTeamHub({ prepared }: { prepared: PreparedConnection }) {
   );
 }
 
-export function TeamHubSettings() {
+export function TeamHubSettings({ initialMode = "join" }: { initialMode?: TeamHubMode }) {
   const environmentId = usePrimaryEnvironmentId();
   const prepared = usePreparedConnection(environmentId);
   return (
-    <SettingsSection id="team-hub" title="Team hub">
+    <SettingsSection id="team-hub" title="Team hub" hideTitle>
       {Option.isSome(prepared) ? (
-        <ConnectedTeamHub prepared={prepared.value} />
+        <ConnectedTeamHub prepared={prepared.value} initialMode={initialMode} />
       ) : (
         <SettingsRow
           title="No environment"

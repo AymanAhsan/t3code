@@ -17,7 +17,7 @@ Invite links are built from the address the admin's app saved when the hub was s
 
 ## Choosing an address
 
-If the hub runs on the same computer as your T3 Code server, **Settings → Integrations → Team hub → Set up a hub** can share it over Tailscale for you, publicly with Funnel or privately on your tailnet. Run the hub, then choose Tailscale there. The steps below are for a hub on another machine, or to do the same by hand.
+If the hub runs on the same computer as your T3 Code server, **Team hub → Set up a hub** (sidebar, **Set up a team**) can share it over Tailscale for you, publicly with Funnel or privately on your tailnet. Run the hub, then choose Tailscale there. The steps below are for a hub on another machine, or to do the same by hand.
 
 | Situation                                                | Use                                                                                                                                                      |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -43,13 +43,13 @@ Funnel makes the hub reachable from the public internet. Access is controlled by
 
 ## First team
 
-The container log prints a one-time setup link, using `HUB_PUBLIC_URL` as its address. Open T3 Code's **Settings → Integrations → Team hub → Set up a hub** and paste the link to create the first team. Completing setup removes the link's token from the database, so the hub prints no setup link on later starts.
+The container log prints a one-time setup link, using `HUB_PUBLIC_URL` as its address. In T3 Code, select **Set up a team** in the sidebar and paste the link to create the first team. Completing setup removes the link's token from the database, so the hub prints no setup link on later starts.
 
 Invites expire after 24 hours and admins can revoke them from the Team hub panel.
 
 ## Protocol
 
-The hub requires protocol version 5 for WebSocket connections and responds with HTTP 426 when the client uses a different version. Version 5 adds per-member automatic-start allowances and durable task reservations. Update all connected environments before enabling automatic tasks. Update the hub and every teammate's T3 Code together. An existing hub database gains the new columns on its first start. Previously accepted tasks have no thread link; post and accept a new task to use completion reporting for that work.
+The hub requires protocol version 6 for WebSocket connections and responds with HTTP 426 when the client uses a different version. Version 5 added per-member automatic-start allowances and durable task reservations. Version 6 adds member activity (whether an agent is running, and which kind), which the hub keeps in memory and forgets on restart. Update all connected environments before enabling automatic tasks. Update the hub and every teammate's T3 Code together. An existing hub database gains the new columns on its first start. Previously accepted tasks have no thread link; post and accept a new task to use completion reporting for that work.
 
 ## Local development with Alice and Bob
 
